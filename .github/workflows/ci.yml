@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - run: uv lock --check
+      - run: uv sync --frozen --group dev --python ${{ matrix.python-version }}
+      - run: uv run --frozen --python ${{ matrix.python-version }} pytest tests/ -q
+
+  windows-build:
+    name: Windows bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - run: uv sync --frozen --group build --group dev
+      - run: uv run --frozen pytest tests/ -q
+      - shell: powershell
+        run: .\build_windows.ps1 -SkipInstall
+      - shell: powershell
+        run: |
+          @('AIRE.exe', 'LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD_PARTY_NOTICES.txt') |
+            ForEach-Object {
+              if (-not (Test-Path (Join-Path 'dist\AIRE' $_))) {
+                throw "Missing release file: $_"
+              }
+            }
+          if (-not (Get-ChildItem 'dist' -Filter 'AIRE-v*-win64.zip')) {
+            throw 'Missing release archive'
+          }
+          if (-not (Test-Path 'dist\SHA256SUMS.txt')) {
+            throw 'Missing SHA256SUMS.txt'
+          }

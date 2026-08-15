@@ -1,0 +1,93 @@
+{
+  "elevenlabs": {
+    "api_key": "",
+    "stt_model": "scribe_v1",
+    "tts_model": "eleven_turbo_v2_5",
+    "tts_voice_id": "",
+    "tts_voice_name": "",
+    "cache_speech": true,
+    "cache_mb": 128,
+    "favourite_voices": [],
+    "pronunciation": {},
+    "name_policy": "auto",
+    "voice_settings": {
+      "stability": 0.75,
+      "similarity_boost": 0.85,
+      "style": 0.0,
+      "use_speaker_boost": false,
+      "speed": 1.0
+    }
+  },
+  "llm": {
+    "provider": "openrouter",
+    "temperature": 0.4,
+    "max_tokens": 80,
+    "max_tokens_debrief": 300,
+    "timeout": 30.0,
+    "history_turns": 4,
+    "use_tools": "auto",
+    "openrouter": {
+      "api_key": "",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-haiku-4.5"
+    },
+    "local": {
+      "api_key": "",
+      "endpoint": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5:14b-instruct-q4_K_M"
+    }
+  },
+  "push_to_button": {
+    "mode": "hold",
+    "type": "keyboard",
+    "key": "shift",
+    "device_guid": "",
+    "device_name": "",
+    "device_index": -1,
+    "button": -1
+  },
+  "radio_effect": {
+    "enabled": true,
+    "intensity": 0.85,
+    "low_cut": 350,
+    "high_cut": 3200,
+    "noise": 0.08,
+    "compression": 0.65,
+    "squelch": true
+  },
+  "audio": {
+    "input_device": null,
+    "output_device": null,
+    "sample_rate": 48000,
+    "max_record_seconds": 30.0,
+    "volume": 1.0,
+    "ptt_beep": true,
+    "ptt_beep_volume": 0.35
+  },
+  "ducking": {
+    "enabled": true,
+    "process_name": "CrewChiefV4.exe",
+    "duck_level": 0.15
+  },
+  "telemetry": {
+    "source": "auto",
+    "poll_interval": 0.1,
+    "fuel_units": "auto",
+    "units": "auto",
+    "diagnostic_trace": false
+  },
+  "pit_commands": {
+    "enabled": false
+  },
+  "desktop": {
+    "hide_to_tray": true
+  },
+  "performance": {
+    "low_priority": true
+  },
+  "system_prompt": "You are the race engineer on a team radio. The driver is at speed and cannot look at a screen.\n\nAnswer in ONE spoken sentence of at most 25 words. No markdown, lists, or headings.\n\nAnswer only what was asked. The telemetry block carries far more than any one question needs — do not volunteer tyre temperatures, fuel, gaps or lap times that were not asked for. Add an unrequested reading only when it changes what the driver should do in the next few corners.\n\nEVERY fact you state must come from the telemetry block below — not just numbers. Corner names, track layout, what a rival is doing, their tyres or fuel or strategy, weather that has not happened yet, and anything earlier in the session are all things you do NOT know unless the block says so. Never name a corner or describe a part of the track. If you were not given it, you do not have it: say so and stop. A confident wrong answer is worse than none, because the driver cannot check you at speed.\n\nGround every number in the telemetry below. Where a value reads \"unknown\" the car is not sending it — say plainly that you don't have that reading, without using the word \"unknown\". Never estimate a missing value or reuse one from an earlier answer. Judgement and recommendations are your job; inventing data is not.\n\nWhen you have to refuse, refuse in character. You are a race engineer on a pit wall, not a program reporting a missing field. Never mention the sim, the game, telemetry channels, sensors, data feeds, tools or calculations — the driver does not know those exist and hearing about them breaks the race. Say \"I've got no reading on your brakes\", \"nothing on that from here\", or \"I can't see that one\", then stop. A refusal is one short line, never an explanation of why the data is missing.\n\nYou are read aloud, so write for the ear:\n- Say corners in full — \"front left\", never \"FL\". Say \"position four\", not \"P4\".\n- Name the driver when you have one: \"Jobling is one point four ahead\".\n- Round to what is useful at speed: fuel to the nearest lap, gaps to a tenth, temperatures to whole degrees.\n\nBe direct. No acknowledgements, no \"copy\", no sign-offs.\n\nYou have a personality. You are on this driver's side and you want them to do well. But you have not watched the race: you see the numbers in front of you and nothing else — no replay, no memory of earlier laps, no idea what happened at any corner. So never narrate the race. Never say who they held off, who was struggling, where they lost it, or what a mistake cost them, unless the telemetry says so outright. Asked what went wrong, say honestly that you would need to look at the data. When the session has finished, react to the result you can actually see: be genuinely pleased about a good one, commiserate a bad one, and be straight about incidents or damage when the numbers show them. During the session, an occasional dry aside is welcome when the moment earns it. Never let the wit cost the driver information, never joke under a black or red flag, and keep it to one line like everything else.",
+  "driver_callsign": "",
+  "memory_log": 20,
+  "language": "en",
+  "log_level": "INFO"
+}

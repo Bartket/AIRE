@@ -1,0 +1,87 @@
+[project]
+name = "aire"
+version = "0.1.0"
+description = "AIRE — a spoken race engineer for iRacing"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Bartosz Kopytek" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+
+# Lower bounds only, on the four that would break the app rather than fail
+# to install: the pinned set the app actually runs is `uv.lock`, which CI
+# enforces with `uv lock --check`. These floors are for `pip install aire`,
+# which otherwise resolves against whatever exists on the day. They do not
+# defend against a future major — nothing but the lock does — they state the
+# oldest release this code is written against.
+dependencies = [
+    # Web UI + server
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart",
+    # HTTP client — OpenRouter / local LLM and the ElevenLabs APIs
+    "httpx>=0.27",
+    # Audio capture and playback
+    "sounddevice",
+    "soundfile",
+    # Radio effect
+    "numpy>=1.26",
+    "scipy>=1.11",
+    # Global push-to-talk hotkey
+    "pynput",
+    # Sim wheel / button box push-to-talk (SDL joystick)
+    "pygame-ce",
+    # Desktop shell: native window + system tray
+    "pywebview",
+    "pystray",
+    "pillow",
+    # iRacing telemetry. Without it the app falls back to simulated telemetry.
+    # NB: the PyPI package is "pyirsdk"; the import name is "irsdk".
+    "pyirsdk; sys_platform == 'win32'",
+    # Per-application volume ducking (Crew Chief). No-op when absent.
+    "pycaw; sys_platform == 'win32'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Bartket/conversational-ai-race-engineer"
+Documentation = "https://github.com/Bartket/conversational-ai-race-engineer#readme"
+Issues = "https://github.com/Bartket/conversational-ai-race-engineer/issues"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+aire = "ai_race_engineer.cli:main"
+
+[dependency-groups]
+# Only needed to produce the Windows executable, not to run from source.
+build = ["pyinstaller"]
+# Tests over the arithmetic the driver acts on.
+dev = ["pytest"]
+
+[tool.uv]
+# The build machine resolves for Windows while development happens on Linux,
+# so the lock has to cover both rather than whichever ran `uv lock` last.
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+
+[tool.setuptools.packages.find]
+include = ["ai_race_engineer*"]
+
+[tool.setuptools.package-data]
+ai_race_engineer = [
+    "static/*",
+    "static/ui/*",
+    "static/ui/fonts/*",
+    "static/vendor/*",
+]

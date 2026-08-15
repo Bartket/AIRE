@@ -1,0 +1,1405 @@
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  /* Variable font: one file covers every weight we use. */
+  font-weight: 100 900;
+  font-display: swap;
+  src: local('Inter'), url('/static/ui/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                 U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+                 U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* AI Race Engineer - Settings Panel CSS */
+
+/* Variables & Reset */
+/* Design tokens.
+
+   Two themes from one set of names: every colour below is redefined under
+   [data-theme="light"], so components never reference a raw hex. The accent
+   is the brand orange from the logo — the panel previously used Bootstrap's
+   default blue, which is the single thing that made it look unfinished next
+   to its own mark. */
+:root {
+  color-scheme: dark;
+
+  /* Brand */
+  --brand: #FF6B41;
+  --brand-soft: rgba(255, 107, 65, 0.12);
+  --brand-line: rgba(255, 107, 65, 0.28);
+  /* Large filled areas use the muted accent; full saturation across a whole
+     tab or button is what made the panel tiring to sit in front of. */
+  --brand-fill: #C4491F;
+
+  /* Surfaces. Not black — a lifted charcoal is easier to sit with for a
+     long session, and still reads as dark next to the sim. */
+  --background: #15181F;
+  --surface: #1B1F28;
+  --surface-raised: #222732;
+  --surface-sunken: #12151B;
+
+  /* Text. Pure white on near-black is the classic eye-strain pairing. */
+  --text: #D8DEE7;
+  --text-muted: #949CAB;
+  --text-faint: #6C7484;
+
+  /* Lines */
+  --border-color: #2A303B;
+  --border-strong: #3A4250;
+
+  /* Accents. Primary is the brand; secondary is a quiet neutral so a row of
+     buttons does not read as a row of alerts. */
+  --primary: var(--brand-fill);
+  --primary-hover: #D95526;
+  --primary-text: #FFFFFF;
+  --secondary: #262B36;
+  --secondary-hover: #333A48;
+  --secondary-text: var(--text);
+
+  --danger: #F2555A;
+  --success: #3DD68C;
+  --warning: #E8AE4A;
+  --info: #6E8BFF;
+
+  --focus-color: var(--brand);
+  --focus-ring: 0 0 0 3px rgba(255, 92, 46, 0.35);
+
+  --font-main: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', -apple-system,
+               BlinkMacSystemFont, Roboto, sans-serif;
+  --font-mono: 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Consolas,
+               'Roboto Mono', ui-monospace, monospace;
+
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+
+  /* Layered rather than one flat drop, so raised surfaces read as lifted
+     instead of outlined. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.4), 0 24px 48px rgba(0, 0, 0, 0.45);
+
+  --transition-smooth: all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --brand: #D8431A;
+  --brand-soft: rgba(216, 67, 26, 0.08);
+  --brand-line: rgba(216, 67, 26, 0.26);
+  --brand-fill: #D8431A;
+
+  --background: #F1F3F6;
+  --surface: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #F5F7FA;
+
+  --text: #1C2029;
+  --text-muted: #5B6472;
+  --text-faint: #8A94A4;
+
+  --border-color: #DFE3EA;
+  --border-strong: #C4CBD6;
+
+  --primary-hover: #C93B14;
+  --primary-text: #FFFFFF;
+  --secondary: #E7EAF0;
+  --secondary-hover: #DBE0E9;
+  --secondary-text: #262B36;
+
+  --danger: #C8323B;
+  --success: #17864F;
+  --warning: #9A6B12;
+  --info: #3355D6;
+
+  --focus-ring: 0 0 0 3px rgba(226, 69, 26, 0.28);
+
+  --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.06);
+  --shadow-md: 0 1px 2px rgba(16, 20, 28, 0.06), 0 8px 20px rgba(16, 20, 28, 0.08);
+  --shadow-lg: 0 2px 6px rgba(16, 20, 28, 0.08), 0 24px 48px rgba(16, 20, 28, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    --brand: #D8431A;
+    --brand-soft: rgba(216, 67, 26, 0.08);
+    --brand-line: rgba(216, 67, 26, 0.26);
+    --brand-fill: #D8431A;
+
+    --background: #F1F3F6;
+    --surface: #FFFFFF;
+    --surface-raised: #FFFFFF;
+    --surface-sunken: #F5F7FA;
+
+    --text: #1C2029;
+    --text-muted: #5B6472;
+    --text-faint: #8A94A4;
+
+    --border-color: #DFE3EA;
+    --border-strong: #C4CBD6;
+
+    --primary-hover: #C93B14;
+    --primary-text: #FFFFFF;
+    --secondary: #E7EAF0;
+    --secondary-hover: #DBE0E9;
+    --secondary-text: #262B36;
+
+    --danger: #C8323B;
+    --success: #17864F;
+    --warning: #9A6B12;
+    --info: #3355D6;
+
+    --focus-ring: 0 0 0 3px rgba(226, 69, 26, 0.28);
+
+    --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.06);
+    --shadow-md: 0 1px 2px rgba(16, 20, 28, 0.06), 0 8px 20px rgba(16, 20, 28, 0.08);
+    --shadow-lg: 0 2px 6px rgba(16, 20, 28, 0.08), 0 24px 48px rgba(16, 20, 28, 0.12);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  /* Always reserve the scrollbar. Tabs differ in height, so without this
+     the bar appears on long tabs and vanishes on short ones, shifting the
+     centred layout sideways every time you switch — which reads as the
+     window resizing itself. */
+  scrollbar-gutter: stable;
+}
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--background);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Layout */
+.app-container {
+  /* `width: 100%` is load-bearing, not tidying. body.settings-panel is a
+     column flex container, and an auto cross-axis margin — the `0 auto`
+     below, which centres the column — switches off `align-items: stretch`.
+     Without an explicit width the container is then sized to its *content*,
+     so every tab is as wide as its own widest line: five tabs happened to
+     reach the available 1141px and Audio came out at 1135, which is the
+     panel visibly changing size when you click Audio.
+
+     Measured through the built app, not reasoned about. Two earlier
+     attempts at this bug fixed things the content was doing, and the
+     content was never what decided the width. */
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-md);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Header */
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md) 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--spacing-lg);
+}
+
+.settings-header h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.settings-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.2;
+  transition: var(--transition-smooth);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  border-color: var(--border-color);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+/* Theme picker. Labelled and in the header rather than buried in a tab: an
+   icon that cycles through three states tells nobody what it does, and a
+   setting nobody can find is one nobody uses. */
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.theme-picker select {
+  padding: 0.4rem 0.55rem;
+  background: var(--surface-sunken);
+  color: var(--text);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.theme-picker select:hover {
+  border-color: var(--border-strong);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: var(--primary-text);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+
+.btn-secondary {
+  background-color: var(--secondary);
+  color: var(--secondary-text);
+}
+
+.btn-secondary:hover {
+  background-color: var(--secondary-hover);
+}
+
+/* Content */
+/* Keeps a short tab from collapsing the page to a fraction of a tall one,
+   which made the panel look like it resized on every switch. */
+.settings-content {
+  /* One full-width column. Without an explicit template the implicit grid
+     column sizes to its content, so a tab holding the wide telemetry grid
+     rendered at 1166px while Voice and Input shrank to 783px — the panel
+     appeared to resize itself on every tab change. minmax(0, 1fr) also
+     stops long unbroken strings widening the column past the container. */
+  grid-template-columns: minmax(0, 1fr);
+  /* Keeps a short tab from collapsing the page to a fraction of a tall one.
+     align-content is what stops the rows sharing out that spare height:
+     grid stretches rows by default, so on a tab with two short cards they
+     grew to fill 60vh instead of staying their own size. */
+  min-height: 60vh;
+  align-content: start;
+  display: grid;
+  gap: var(--spacing-lg);
+}
+
+.settings-section {
+  background: var(--surface);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-section h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  margin-bottom: var(--spacing-md);
+  color: var(--text);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Form Controls */
+.form-group {
+  margin-bottom: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.form-group label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="url"],
+.form-group input[type="number"],
+.form-group input[type="search"],
+.form-group input:not([type]),
+.form-group textarea,
+.form-group select {
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-main);
+  font-size: 0.9rem;
+  transition: var(--transition-smooth);
+  /* A <select> sizes itself to its widest <option>, and the audio device
+     lists are whatever Windows calls the hardware — one real name was 86
+     characters. With no limit that select stretched the Audio tab wider
+     than every other tab, so switching to it looked like the panel
+     resizing itself. Same family as the grid-column fix on
+     .settings-content: content deciding the width of a container that
+     should have been deciding it. */
+  max-width: 100%;
+}
+
+.form-group input:hover:not(:focus),
+.form-group textarea:hover:not(:focus),
+.form-group select:hover:not(:focus) {
+  border-color: var(--border-strong);
+}
+
+.form-group ::placeholder {
+  color: var(--text-faint);
+}
+
+/* The prompt box is worth resizing, but only downwards and within reason:
+   horizontal dragging breaks the column layout, and an unbounded drag
+   leaves a text area taller than the window with the Save button somewhere
+   below the fold. */
+.form-group textarea {
+  resize: vertical;
+  min-height: 8.5rem;
+  max-height: 28rem;
+  line-height: 1.5;
+  font-size: 0.88rem;
+}
+
+/* Number fields do not need to span the whole panel. */
+.form-group input[type="number"] {
+  max-width: 160px;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-ring);
+}
+
+/* Selects get the ring only for keyboard users. A select keeps focus after
+   you pick from it, so styling plain :focus left an orange box sitting
+   around every dropdown you had touched. */
+.form-group select:focus-visible,
+/* Keyboard users get the same ring on every control, not just inputs. */
+.btn:focus-visible,
+.tab:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="range"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Voice Grid */
+.voice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--spacing-sm);
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 2px;                       /* room for the selected ring */
+}
+
+.voice-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.voice-card:hover:not(.locked) {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+
+/* The selected voice was highlighted in Bootstrap blue on an orange UI —
+   this rule predates the theme and was missed when the rest was tokenised. */
+.voice-card.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.voice-card.locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voice-info {
+  /* Absorb the free space so the star and preview sit together on the
+     right. The card is justify-content: space-between, so without this a
+     third child would push the two buttons apart instead. */
+  flex: 1;
+  min-width: 0;                       /* let long names ellipsis rather than push */
+}
+
+.voice-info h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Two lines rather than one clipped one: the traits and the voice's own
+   description together do not fit on a single row at this width. */
+.voice-info p {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A tick reads faster than a colour change alone. */
+.voice-card.active .voice-info h3::before {
+  content: "\2713";
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.voice-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.library-badge {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.locked-badge {
+  background: rgba(232, 174, 74, 0.15);
+  color: var(--warning);
+}
+
+/* A round play button reads as "hear this" at a glance, where a text
+   button competed with the voice name beside it. */
+.voice-card .btn-fave {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+/* Starred stays visible without the card looking selected — that state
+   already means "this is the voice in use". */
+.voice-card .btn-fave.on {
+  color: #f0b429;
+}
+
+.voice-card .btn-fave:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-color);
+  color: #f0b429;
+}
+
+.voice-card .btn-preview {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.voice-card .btn-preview:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.voice-card .btn-preview:hover:not(:disabled) .play-icon {
+  border-left-color: var(--primary-text);
+}
+
+.voice-card .btn-preview:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.voice-card .btn-preview:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* CSS triangle: no icon font, no inline SVG per card. */
+.play-icon {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--text-muted);
+  transition: var(--transition-smooth);
+}
+
+/* Filter row above the grid. */
+.voice-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.voice-filters input[type="text"] {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+
+.voice-filters input[type="text"]:focus {
+  outline: none;
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-ring);
+}
+
+.chip-row {
+  display: flex;
+  gap: 4px;
+}
+
+.chip {
+  padding: 0.35rem 0.7rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.chip:hover:not(.on) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chip.on {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Filter Controls */
+.filter-controls {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.filter-controls > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+/* Track List */
+.track-item {
+  padding: var(--spacing-xs) 0;
+}
+
+.track-item label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  cursor: pointer;
+}
+
+/* Format Buttons */
+.format-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.format-buttons button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--background);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.format-buttons button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.format-buttons button:hover:not(.active) {
+  border-color: var(--primary);
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--surface-raised);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+  max-width: 800px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.close-btn:hover {
+  color: var(--text);
+}
+
+/* Exchange Log */
+.exchange-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.log-entry {
+  background: var(--background);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.8rem;
+}
+
+.log-time {
+  color: var(--text-muted);
+}
+
+.log-source {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.log-source.question {
+  background: var(--brand-soft);
+  color: var(--primary);
+}
+
+.log-source.answer {
+  background: rgba(40, 167, 69, 0.2);
+  color: var(--success);
+}
+
+.log-content p {
+  margin-bottom: var(--spacing-xs);
+  color: var(--text);
+}
+
+.log-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.log-buttons button {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--secondary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.log-buttons button:hover {
+  background: var(--secondary-hover);
+}
+
+/* About Modal */
+.about-content p {
+  margin-bottom: var(--spacing-md);
+}
+
+.about-links {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.about-links a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.about-links a:hover {
+  text-decoration: underline;
+}
+
+.version-info {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .settings-header {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+  
+  .settings-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .voice-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .format-buttons,
+  .about-links {
+    flex-direction: column;
+  }
+  
+  .modal-content {
+    width: 95%;
+    padding: var(--spacing-md);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Desktop panel: status bar, rows, telemetry, notifications.
+   These live here rather than being injected from app.js so the
+   whole layout is in one place.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.status-dot.on { background: var(--success); }
+.status-dot.off { background: var(--danger); }
+
+/* A form-group laid out horizontally. `.form-group` sets column
+   direction, so the row direction has to be restated here. */
+.inline-row {
+  /* Also used as a standalone wrapper, not only as a .form-group modifier.
+     Without its own display the children stacked, which is why the Refresh
+     button sat under the field instead of beside it. */
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* Buttons sitting next to each other need more room than a button joined
+   to its input does: side by side at an 8px gap they read as one control
+   strip, and it is easy to hit the wrong one. */
+.inline-row .btn + .btn,
+.preset-row .btn + .btn {
+  margin-left: var(--spacing-sm);
+}
+
+.inline-row input[type="text"],
+.inline-row input[type="password"],
+.inline-row select {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* Checkbox rows: checkbox first, then its label. Without an explicit
+   width a checkbox stretches to fill a column flex container and
+   renders its glyph in the middle of the row. */
+.form-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.form-group input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.form-toggle label {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Keep a toggle's explanation visibly attached to that toggle. */
+.form-toggle.with-hint {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  column-gap: var(--spacing-sm);
+  row-gap: var(--spacing-xs);
+}
+
+.form-toggle.with-hint .hint {
+  grid-column: 2;
+}
+
+/* Slider + live value on one line. */
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.range-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--primary);
+}
+
+.range-value {
+  min-width: 58px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.filter-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--spacing-md);
+}
+
+/* Helper text under a field. */
+.hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.hint code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--background);
+  font-size: 0.78rem;
+}
+
+.result-ok { color: var(--success); font-size: 0.85rem; }
+.result-bad { color: var(--danger); font-size: 0.85rem; }
+
+/* Live telemetry readout. */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.telemetry-grid span {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* Buttons should not stretch to the full width of a column flex. */
+.form-group > .btn,
+.form-group > button {
+  align-self: flex-start;
+}
+
+/* Toast notifications. */
+.notification {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2000;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  background: rgba(20, 22, 28, 0.95);
+  border: 1px solid var(--border-color);
+  color: var(--primary-text);
+  box-shadow: var(--shadow-md);
+  animation: notify-in 0.25s ease-out;
+}
+
+.notification.error {
+  background: rgba(190, 40, 50, 0.95);
+  border-color: rgba(255, 120, 120, 0.5);
+}
+
+.notification.fade-out { animation: notify-out 0.3s ease-out forwards; }
+
+@keyframes notify-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes notify-out {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(-12px); }
+}
+
+/* Voice availability tags ------------------------------------------- */
+
+.voice-badge {
+  display: inline-block;
+  margin-left: var(--spacing-xs);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.locked-badge {
+  background: rgba(226, 160, 46, 0.16);
+  border: 1px solid rgba(226, 160, 46, 0.55);
+  color: var(--warning);
+}
+
+.library-badge {
+  background: rgba(120, 145, 255, 0.14);
+  border: 1px solid rgba(120, 145, 255, 0.45);
+  color: var(--info);
+}
+
+/* A voice the account cannot synthesize: visible, but clearly inert. */
+.voice-card.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.voice-card.locked:hover {
+  border-color: rgba(226, 160, 46, 0.6);
+}
+
+.voice-card.locked button {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   AIRE brand header + tab navigation
+   ───────────────────────────────────────────────────────────────── */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Wordmark: outlined lettering in the logo's white, not the heading blue.
+   The height is the cap height, matched to the 1.65rem Inter it replaced. */
+.brand-text h1 {
+  margin: 0;
+  line-height: 0;
+  color: var(--text);
+}
+
+.brand-text .wordmark {
+  display: block;
+  height: 1.2rem;
+  width: auto;
+  /* Outlines have no descender space, so replace what the old line box gave. */
+  margin-bottom: 0.28rem;
+}
+
+.brand-sub {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* Tabs — the panel is long enough that one scroll buries the settings
+   you only touch during a race. */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--spacing-lg);
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.tab {
+  flex: 1 1 auto;
+  min-width: 86px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-main);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  white-space: nowrap;
+}
+
+.tab:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--primary);
+  color: var(--primary-text);
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .settings-header { flex-direction: column; align-items: flex-start; gap: var(--spacing-md); }
+  .brand-logo { width: 38px; height: 38px; }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────
+   Typography
+   ───────────────────────────────────────────────────────────────── */
+
+body {
+  /* Contextual alternates + kerning; Inter reads noticeably better with
+     both on, and slightly tighter tracking suits the dark theme. */
+  font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss01' 1;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3 {
+  letter-spacing: -0.018em;
+  font-weight: 650;
+}
+
+.settings-section h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.form-group label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.012em;
+}
+
+/* Numbers that change in place must not jitter — tabular figures keep
+   every digit the same width. */
+.range-value,
+.telemetry-grid,
+.status-bar,
+.log-time,
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Combobox — replaces <datalist>, which the browser closes on every
+   DOM patch (the telemetry poll was dismissing it mid-hover).
+   ───────────────────────────────────────────────────────────────── */
+
+.combo {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.combo input {
+  width: 100%;
+}
+
+/* A process name is short; letting the field run the full panel width
+   made it look like a text area rather than a picker. */
+.combo-narrow {
+  flex: 0 1 320px;
+  max-width: 320px;
+}
+
+.combo-list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.combo-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+
+.combo-list li:hover {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.combo-id {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.combo-name {
+  font-size: 0.74rem;
+  opacity: 0.65;
+}
+
+.combo-list li.combo-more {
+  cursor: default;
+  font-size: 0.74rem;
+  opacity: 0.6;
+  text-align: center;
+}
+
+.combo-list li.combo-more:hover {
+  background: transparent;
+  color: inherit;
+}
+
+/* Volume readout turns amber once past unity, so boost is visible at a glance. */
+.range-value.boosting {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+
+/* Voice-settings guidance: a short explainer plus one-click presets, so a
+   stuttering voice is a two-second fix rather than a slider hunt. */
+.callout {
+    background: var(--brand-soft);
+    border: 1px solid var(--brand-line);
+    border-left: 3px solid var(--brand);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    margin-bottom: 1.4rem;
+    font-size: 0.87rem;
+    line-height: 1.5;
+}
+
+.callout .hint {
+    margin-bottom: 0;
+}
+
+.preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin: 0.85rem 0 0.6rem;
+}
+
+.preset-row .btn {
+    flex: 0 0 auto;
+}
+
+
+/* The bound key, shown beside its Bind button. */
+.binding-display {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.7rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text);
+}

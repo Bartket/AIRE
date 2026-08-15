@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+# Regenerated per-platform at build time by tools/generate_third_party_notices.py
+THIRD_PARTY_NOTICES.txt
+
+.venv/
+venv/
+env/
+
+# Local settings — may contain API keys.
+config.json
+
+# Working notes for Coding Agents
+CLAUDE.md
+AGENTS.md
+TODO.md
+
+.vscode/
+.idea/
+.DS_Store
