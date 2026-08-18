@@ -6,6 +6,10 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.2.0
+
 ### Fixed
 
 - A position iRacing had not classified was reported as a place. The sim
@@ -19,6 +23,9 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 - Qualifying ending announced itself as "RACE OVER — finished P2", with the
   race still to come, and compared the driver's lap against "the fastest lap
   of the race".
+- Every public link pointed at a private repository, so the download link in
+  the README, the clone command, the in-app links and the OpenRouter referer
+  header were all dead for anybody who is not the author.
 
 ### Added
 

@@ -30,7 +30,7 @@ createApp({
       asking: false,
       testingLLM: false,
       loadingModels: false,
-      version: '0.1.0',
+      version: '0.2.0',
 
       // Server-backed config. Replaced wholesale by loadConfig().
       config: null,
@@ -227,7 +227,7 @@ createApp({
       //
       // Points at the repo rather than at a bundled copy so the link is
       // right for the build the reader has, not the one they downloaded.
-      const base = 'https://github.com/Bartket/conversational-ai-race-engineer';
+      const base = 'https://github.com/Bartket/AIRE';
       return anchor ? `${base}#${anchor}` : base;
     },
     applyVoicePreset(name) {

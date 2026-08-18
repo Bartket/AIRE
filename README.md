@@ -52,7 +52,7 @@ $0.015 across both providers. See [Running costs](#running-costs).
 
 ### 1. Download and extract AIRE
 
-Open the **[latest release](https://github.com/Bartket/conversational-ai-race-engineer/releases/latest)**
+Open the **[latest release](https://github.com/Bartket/AIRE/releases/latest)**
 and download the file named `AIRE-...-win64.zip`. Do not download GitHub's
 automatically generated **Source code** archives.
 
@@ -742,8 +742,8 @@ the 25-word limit doing its job.
 ## Build from source
 
 ```bash
-git clone https://github.com/Bartket/conversational-ai-race-engineer.git
-cd conversational-ai-race-engineer
+git clone https://github.com/Bartket/AIRE.git
+cd AIRE
 
 uv sync                        # creates .venv and installs from uv.lock
 ```
