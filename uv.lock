@@ -16,7 +16,7 @@ supported-markers = [
 
 [[package]]
 name = "aire"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

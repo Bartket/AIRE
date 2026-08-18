@@ -1,6 +1,6 @@
 [project]
 name = "aire"
-version = "0.1.0"
+version = "0.2.0"
 description = "AIRE — a spoken race engineer for iRacing"
 readme = "README.md"
 license = "MIT"
@@ -50,9 +50,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Bartket/conversational-ai-race-engineer"
-Documentation = "https://github.com/Bartket/conversational-ai-race-engineer#readme"
-Issues = "https://github.com/Bartket/conversational-ai-race-engineer/issues"
+Homepage = "https://github.com/Bartket/AIRE"
+Documentation = "https://github.com/Bartket/AIRE#readme"
+Issues = "https://github.com/Bartket/AIRE/issues"
 
 [build-system]
 requires = ["setuptools>=68"]

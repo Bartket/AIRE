@@ -33,7 +33,7 @@ COMMS_FAILURE = "I have comms issues right now."
 NO_ANSWER = "I lost that one, say again."
 
 # Sent with OpenRouter requests for attribution on their dashboard.
-_REFERER = "https://github.com/Bartket/conversational-ai-race-engineer"
+_REFERER = "https://github.com/Bartket/AIRE"
 _APP_TITLE = "AI Race Engineer"
 
 # A question needing more than two rounds of calculation is a model looping,
