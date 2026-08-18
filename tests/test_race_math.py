@@ -2798,3 +2798,79 @@ def test_the_annotations_in_this_module_still_resolve():
             typing.get_type_hints(value)      # raises NameError on a missing import
             checked += 1
     assert checked > 20, "nothing was actually introspected"
+
+
+# ── What runs out first ─────────────────────────────────────────────
+
+
+def _quali(**kw):
+    """Lone Qualify: a two-lap allowance inside an eight-minute window.
+
+    The numbers are a captured session — `SessionType: Lone Qualify,
+    SessionLaps: 2, SessionTime: 480.0000 sec`.
+    """
+    base = dict(session_type="Lone Qualify", laps_total=2, laps_remaining=1,
+                time_remaining=300.0, time_total=480.0,
+                solo_qualifying=True, qualify_scoring="best lap")
+    base.update(kw)
+    return TrackConfig(**base)
+
+
+def test_the_qualifying_lap_allowance_is_the_budget_not_the_clock():
+    """This is the bug. The engineer knew only that five minutes were left,
+    so it told a driver on their last flier that they had time to keep
+    trying. They had one lap. The clock is the window the allowance has to
+    be spent in, which is a different thing and is now decided here rather
+    than by whichever line the model read first."""
+    result = rm.session_status(_car(), _quali())
+    assert result["available"]
+    assert result["binds"] == "laps"
+    spoken = result["spoken"].lower()
+    assert "1 lap left" in spoken
+    assert "not your budget" in spoken
+
+
+def test_the_clock_can_still_stop_a_driver_who_has_laps_in_hand():
+    """The fix must not overshoot into the opposite error: with twenty
+    seconds left, a lap in hand is not a lap you get to run."""
+    result = rm.session_status(_car(), _quali(time_remaining=20.0))
+    assert result["binds"] == "clock"
+    assert "no lap limit" not in result["spoken"].lower()
+    assert "clock stops you" in result["spoken"].lower()
+
+
+def test_a_qualifying_session_with_no_allowance_is_limited_by_the_clock():
+    """`SessionLaps: unlimited` in a Lone Qualify session is also real — a
+    captured session pairs it with a twelve-minute clock. There the clock
+    genuinely is the budget."""
+    result = rm.session_status(
+        _car(), _quali(laps_total=None, laps_remaining=None, time_remaining=720.0))
+    assert result["binds"] == "clock"
+    assert "no lap limit" in result["spoken"].lower()
+
+
+def test_an_averaged_qualifying_result_is_said_so():
+    """A driver whose result is an average of four laps cannot treat one
+    scruffy lap the way a best-lap driver can."""
+    result = rm.session_status(_car(), _quali(laps_to_average=4))
+    assert "average over 4 laps" in result["spoken"]
+
+
+def test_neither_limit_published_is_a_refusal_not_a_guess():
+    track = TrackConfig(session_type="Lone Qualify")
+    assert rm.session_status(_car(), track)["available"] is False
+
+
+def test_the_session_limit_is_not_guessed_without_a_lap_time():
+    """Converting a clock into laps needs a measured lap time. Without one
+    the honest answer is that either limit could arrive first."""
+    track = _quali()
+    assert rm.session_limit(_car(best_lap_time=None), track)["binds"] == "both"
+
+
+def test_a_finished_qualifying_session_is_not_a_race_that_was_finished():
+    """The driver still has the race to come. "You finished P2" told them
+    the day was over."""
+    car = _car(position=2, class_position=2)
+    track = TrackConfig(session_type="Lone Qualify", finished=True)
+    assert rm.position_report(car, track)["spoken"] == "You qualified P2."

@@ -106,6 +106,136 @@ def _laps_to_go(car: CarTelemetry, track: TrackConfig) -> Optional[float]:
     return None
 
 
+def _spoken_clock(seconds: float) -> str:
+    """Session time as words. The model must never be handed 480.0 to read."""
+    whole = int(max(0.0, seconds))
+    minutes, secs = divmod(whole, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{_plural(hours, 'hour')} {_plural(minutes, 'minute')}"
+    if minutes:
+        return (_plural(minutes, "minute") if secs < 10
+                else f"{_plural(minutes, 'minute')} {_plural(secs, 'second')}")
+    return _plural(secs, "second")
+
+
+def session_limit(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """What actually ends the driver's running, and how much of it is left.
+
+    One classifier, in one place, because a session can be bounded by a lap
+    count, by the clock, or by whichever arrives first — and leaving the
+    model to choose between the two lines of the telemetry block is how it
+    came to offer a driver eight minutes of qualifying when what they had
+    was two laps.
+
+    "binds" is never guessed. Where only one limit is published, that one
+    binds. Where both are and there is no measured lap time to convert
+    between them, the honest answer is that either could, not a coin toss
+    dressed up as a decision.
+    """
+    kind = session_kind(track.session_type)
+    laps_left = track.laps_remaining
+    time_left = track.time_remaining
+    lap = car.avg_lap_time or car.last_lap_time or car.best_lap_time
+    clock_laps = (time_left / lap) if (time_left is not None and lap and lap > 0) else None
+
+    if laps_left is None and time_left is None:
+        binds = None
+    elif laps_left is None:
+        binds = "clock"
+    elif time_left is None:
+        binds = "laps"
+    elif clock_laps is None:
+        binds = "both"
+    elif clock_laps + 0.5 < laps_left:
+        binds = "clock"
+    elif laps_left + 0.5 < clock_laps:
+        binds = "laps"
+    else:
+        binds = "both"
+
+    return {
+        "kind": kind,
+        "laps_left": laps_left,
+        "laps_allowed": track.laps_total,
+        "time_left": time_left,
+        "clock_laps": None if clock_laps is None else round(clock_laps, 1),
+        "binds": binds,
+    }
+
+
+def _scoring_phrase(track: TrackConfig) -> str:
+    """How the qualifying result is decided, where iRacing published it.
+
+    Series differ — a single best lap is the common case, and an averaged
+    format changes what a driver should do with a scruffy lap entirely.
+    Both come from the session YAML, so neither is assumed.
+    """
+    average = track.laps_to_average
+    if average and average > 1:
+        return f"scored on your average over {_plural(average, 'lap')}"
+    scoring = (track.qualify_scoring or "").strip().lower()
+    return "scored on your best lap" if "best" in scoring else ""
+
+
+def session_status(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """How much running is left, and what it is that runs out.
+
+    Exists because "how long have I got" has a different answer in each
+    session, and in qualifying the session clock is usually the wrong one:
+    a Lone Qualify session publishes a lap allowance inside a window, so
+    the minutes on the clock are when the driver may run, not how long
+    they may keep trying.
+    """
+    limit = session_limit(car, track)
+    laps, time_left, binds = limit["laps_left"], limit["time_left"], limit["binds"]
+    if binds is None:
+        return _no("I haven't got a time or a lap count for this session.")
+
+    clock = None if time_left is None else _spoken_clock(time_left)
+    lap_words = None if laps is None else _plural(laps, "lap")
+
+    if limit["kind"] == "qualify":
+        scoring = _scoring_phrase(track)
+        solo = track.solo_qualifying
+        allowance = limit["laps_allowed"]
+        if binds == "laps":
+            spoken = f"{lap_words} left to run"
+            if allowance:
+                spoken += f" of your {_plural(allowance, 'lap')}"
+            if clock:
+                spoken += f", and the {clock} on the clock is your window, not your budget"
+        elif binds == "clock" and laps is None:
+            # No allowance published, so the clock genuinely is the budget.
+            spoken = f"{clock} left, and no lap limit on this one"
+            if solo is False:
+                spoken += ", so you can go again"
+        elif binds == "clock":
+            # There IS an allowance; the clock simply expires first. Saying
+            # "no lap limit" here told a driver with one lap in hand that
+            # they had none, which is the same error the other way round.
+            spoken = f"{clock} left, so the clock stops you before the laps do"
+        else:
+            spoken = f"{lap_words} left and {clock} on the clock, whichever goes first"
+        if scoring:
+            spoken += f" — {scoring}"
+        return _yes(
+            spoken + ".", **limit,
+            solo_qualifying=solo, scoring=scoring or None,
+            basis="published session limits; in qualifying the lap allowance "
+                  "and the clock are different things",
+        )
+
+    if binds == "laps":
+        spoken = f"{lap_words} to go"
+    elif binds == "clock":
+        spoken = f"{clock} left"
+    else:
+        spoken = f"{lap_words} left and {clock} on the clock, whichever goes first"
+    return _yes(spoken + ".", **limit,
+                basis="published session limits")
+
+
 def _plain(text: str) -> str:
     """A name reduced to what two spellings of it have in common.
 
@@ -896,7 +1026,10 @@ def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
         return _no("I haven't got your position right now.")
 
     if getattr(track, "finished", False):
-        return _yes(f"You finished P{car.position}.", position=car.position,
+        # You do not "finish" a qualifying session, you qualify in it — and
+        # the driver still has the race to come.
+        verb = "qualified" if session_kind(track.session_type) == "qualify" else "finished"
+        return _yes(f"You {verb} P{car.position}.", position=car.position,
                     class_position=car.class_position, ahead=None, behind=None)
 
     bits = [f"You're P{car.position}"]
@@ -1887,6 +2020,22 @@ _TOOLS: List[Dict[str, Any]] = [
         "description": "Compare laps of fuel remaining against laps left in the race.",
         "parameters": {"type": "object", "properties": {}},
         "fn": stint_projection,
+    },
+    {
+        "name": "session_status",
+        "description": (
+            "How much running is left in this session and what it is that "
+            "runs out — a lap count, the clock, or whichever comes first. "
+            "Use for 'how long have I got', 'how many laps left', 'how much "
+            "time is left' and anything about how much of the session "
+            "remains. In qualifying it also gives the lap allowance and the "
+            "scoring format, because the session clock there is usually the "
+            "window the driver may run in and NOT how long they may keep "
+            "trying: never read time remaining as a qualifying budget "
+            "yourself, ask this."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+        "fn": session_status,
     },
     {
         "name": "race_history",

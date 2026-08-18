@@ -232,6 +232,9 @@ class PromptBuilder:
         focus = _session_focus(track)
         if focus:
             header.append(focus)
+        fmt = _qualifying_format(track)
+        if fmt:
+            header.append(fmt)
         if getattr(track, "finished", False):
             header.append(_result(car, track, callsign))
 
@@ -240,14 +243,10 @@ class PromptBuilder:
             + [
                 f"- Session: {track.session_type or 'unknown'}{_state(track)}"
                 f" | Track: {track.track_name or 'unknown'}"
-                f" | Lap {track.current_lap}{_of(track.laps_total)}"
+                f"{_lap_counter(track)}"
                 f" | Flag: {car.flag}",
-                f"- Remaining: {_laps(track.laps_remaining)}"
-                f" | Time left: {_clock(track.time_remaining)}",
-                (f"- Finishing position: P{car.position}" if getattr(track, "finished", False)
-                 else f"- Position: P{car.position}")
-                + (f" (P{car.class_position} in class)" if car.class_position
-                   and car.class_position != car.position else "")
+                _remaining_line(car, track),
+                _position_line(car, track)
                 + f" | Speed: {_speed(car, car.speed)}"
                 + f" | Gear: {car.gear or 'unknown'} | RPM: {car.rpm}",
                 f"- Tyre tread remaining (%): FL {_num(car.tire_fl_wear, 0)}"
@@ -598,13 +597,25 @@ def _car_identity(track) -> str:
 
 
 def _result(car, track, callsign: str = "") -> str:
-    """The finished race, stated as a result rather than a running commentary.
+    """The finished session, stated as a result rather than a running commentary.
 
     Without this the engineer keeps calling positions after the flag, because
     every other line in the block reads like a live update.
+
+    Which session finished is part of the result. Qualifying ending announced
+    itself as "RACE OVER — finished P2" for a driver with the race still to
+    come, and told the model the lap it was comparing against was the fastest
+    lap of a race nobody had started.
     """
+    kind = session_kind(getattr(track, "session_type", ""))
+    what = {"race": "RACE OVER", "qualify": "QUALIFYING OVER"}.get(kind, "SESSION OVER")
+    verb = "qualified" if kind == "qualify" else "finished"
     who = callsign or track.driver_name or "your driver"
-    bits = [f"RACE OVER — {who} finished P{car.position}"]
+    if not car.position:
+        # Same rule as the live line: no classification is not a place.
+        return (f"- {what} — iRacing published no position for {who}. Say you "
+                f"haven't got the result, and do not work one out.")
+    bits = [f"{what} — {who} {verb} P{car.position}"]
     if car.class_position and car.class_position != car.position:
         bits.append(f"P{car.class_position} in class")
     if track.field_size:
@@ -614,18 +625,45 @@ def _result(car, track, callsign: str = "") -> str:
         fastest = track.fastest_lap
         if fastest is not None and fastest.known and fastest.best_lap:
             delta = car.best_lap_time - fastest.best_lap
+            whose = "race" if kind == "race" else "session"
             if delta <= 0.001:
-                bits.append("which was the fastest lap of the race")
+                bits.append(f"which was the fastest lap of the {whose}")
             else:
                 holder = fastest.name or f"car {fastest.car_number}"
                 bits.append(
-                    f"{race_math._spoken_delta(delta)} off the fastest lap of the race "
+                    f"{race_math._spoken_delta(delta)} off the fastest lap of the {whose} "
                     f"({holder}, {_laptime(fastest.best_lap)}) — use this figure, do not "
                     f"work the difference out yourself"
                 )
     if car.incidents is not None:
         bits.append(f"{car.incidents} incident points")
     return "- " + ", ".join(bits) + "."
+
+
+def _position_line(car, track) -> str:
+    """The driver's place, or words where the sim has not given them one.
+
+    iRacing publishes 0 for a car it has not classified — before a first
+    timed lap, or when the server is not transmitting that car — and the
+    old version rendered it as "P0". That put a place-shaped hole three
+    lines above a running order that listed the driver second, and asked
+    where they were the engineer answered pole: the same failure as the
+    fuel line, where a blank in a number's slot got filled from whatever
+    number was nearest.
+
+    "unknown" is safe for a reading. It is not safe in a slot the block
+    itself supplies a plausible answer for, so this says outright that the
+    place is missing and that the standings below are not a substitute.
+    """
+    label = "Finishing position" if getattr(track, "finished", False) else "Position"
+    if not car.position:
+        return (f"- {label}: {UNKNOWN} — iRacing has not classified this car, so "
+                f"there is no position to give. Say you haven't got it. Do NOT "
+                f"count the running order below to work one out")
+    line = f"- {label}: P{car.position}"
+    if car.class_position and car.class_position != car.position:
+        line += f" (P{car.class_position} in class)"
+    return line
 
 
 def _fuel_line(car) -> str:
@@ -1047,9 +1085,10 @@ def _session_focus(track) -> str:
     kind = session_kind(getattr(track, "session_type", ""))
     if kind == "qualify":
         return ("- THIS IS QUALIFYING: one lap time is all that matters. Talk about the "
-                "driver's best lap against the session best, where they sit on the "
-                "grid, tyre temperature for the next flying lap, and how much session "
-                "time is left. There is no race to finish, so no strategy, no fuel to "
+                "driver's best lap against the session best, where they sit in the "
+                "order, and tyre temperature for the next flying lap. How much running "
+                "they have left is the session_status calculation, never the session "
+                "clock read off this block. There is no race to finish, so no strategy, no fuel to "
                 "the end, and no pit window. Nobody is chasing anybody: every gap here "
                 "is a difference in lap time, never a car to catch, and qualifying is "
                 "often run alone, so most of the order will not be on track with the "
@@ -1062,6 +1101,89 @@ def _session_focus(track) -> str:
                 "much session time is left. Position is by lap time, not by racing, "
                 "and there is no finish to reach.")
     return ""
+
+
+def _qualifying_format(track) -> str:
+    """How this qualifying session is run, from what iRacing published.
+
+    The engineer took a qualifying session for a stretch of time to keep
+    trying in, because a session clock is what the block looked like it was
+    offering. It is normally an allowance of a lap or two inside a window,
+    and the shape of it differs by series — so this states the shape rather
+    than describing the common case and hoping.
+
+    Every part is published per session: Lone against Open Qualify,
+    SessionLaps for the allowance, and the scoring format. Where iRacing
+    published nothing, this says nothing. An assumed format spoken with
+    confidence is the failure being fixed, not a smaller version of it.
+    """
+    if session_kind(getattr(track, "session_type", "")) != "qualify":
+        return ""
+    if getattr(track, "finished", False):
+        # The allowance is spent and the result is in. Still describing the
+        # budget here would have the engineer telling a driver what they may
+        # do with laps they no longer have.
+        return ""
+
+    bits = []
+    solo = getattr(track, "solo_qualifying", None)
+    if solo is True:
+        bits.append("the driver is out alone — no tow, and nobody to follow")
+    elif solo is False:
+        bits.append("the whole field is out together")
+
+    allowance = track.laps_total
+    if allowance:
+        bits.append(
+            f"iRacing has given them {race_math._plural(allowance, 'lap')} in this "
+            f"session. That allowance is the budget. The session clock is only the "
+            f"window it has to be spent in, and it is NOT how long they may keep "
+            f"trying — typically it is an out lap and a flier or two, then they are "
+            f"done however much time is showing")
+    else:
+        bits.append(
+            "iRacing published no lap allowance, so the clock is what limits the "
+            "running here and they may keep going until it expires")
+
+    scoring = race_math._scoring_phrase(track)
+    if scoring:
+        bits.append(f"the result is {scoring}")
+
+    return "- QUALIFYING FORMAT: " + "; ".join(bits) + "."
+
+
+def _lap_counter(track) -> str:
+    """Lap N of M, where M is a race distance and not something else.
+
+    SessionLaps in a race is the distance to cover. In qualifying it is a
+    lap allowance, and rendering the two identically produced "Lap 3 of 2"
+    for a driver on their out lap plus two fliers — which reads as having
+    overrun a race. The allowance belongs on the remaining line, where it
+    is labelled as one.
+    """
+    if session_kind(getattr(track, "session_type", "")) == "race":
+        return f" | Lap {track.current_lap}{_of(track.laps_total)}"
+    return f" | Lap {track.current_lap}"
+
+
+def _remaining_line(car, track) -> str:
+    """Laps and clock, plus which of the two actually ends the running.
+
+    Both were printed with nothing said about their relationship, and the
+    engineer picked whichever it read first — which in qualifying meant
+    offering eight more minutes to a driver who had two laps. Deciding
+    between them is arithmetic over a lap time, so race_math.session_limit()
+    does it once, in Python, and both this line and the session_status
+    calculation report the same verdict.
+    """
+    line = (f"- Remaining: {_laps(track.laps_remaining)}"
+            f" | Time left: {_clock(track.time_remaining)}")
+    verdict = {
+        "laps": "LAPS are what run out first here — the clock is not the limit",
+        "clock": "the CLOCK is what runs out first here",
+        "both": "laps and clock are close; either could end it first",
+    }.get(race_math.session_limit(car, track)["binds"])
+    return line if verdict is None else f"{line} | {verdict}"
 
 
 def _state(track) -> str:

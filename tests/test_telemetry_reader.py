@@ -635,3 +635,96 @@ def test_an_absurdly_long_name_is_capped():
     )
 
     assert len(reader._drivers()[0]["name"]) == 80
+
+
+# ── Position, where iRacing has not given one ───────────────────────
+
+
+def _live_quali(**values):
+    """A Lone Qualify session, straight from a captured limerock dump."""
+    base = {"PlayerCarIdx": 1, "SessionNum": 1, "SessionState": 4,
+            "PlayerCarPosition": 2, "PlayerCarClassPosition": 2}
+    base.update(values)
+    return _Reader(base, {"SessionInfo": {"Sessions": [{
+        "SessionNum": 1, "SessionType": "Lone Qualify", "SessionName": "QUALIFY",
+        "SessionLaps": 2, "SessionTime": "480.0000 sec",
+        "SessionNumLapsToAvg": 0,
+        "ResultsPositions": [
+            {"Position": 1, "ClassPosition": 0, "CarIdx": 0},
+            {"Position": 2, "ClassPosition": 1, "CarIdx": 1},
+            {"Position": 3, "ClassPosition": 2, "CarIdx": 2},
+        ]}]},
+        "WeekendInfo": {"WeekendOptions": {"QualifyScoring": "best lap"}}})
+
+
+def test_an_unclassified_position_is_not_first_place():
+    """iRacing publishes 0 for a car it has not placed, and not only before
+    the start: a captured field reads `CarIdxPosition: [0, 10, 9, 2, 4, 1,
+    0, ...]`, with the sentinel sitting mid-order. Read as a number it put
+    "P0" in the block three lines above a running order that listed the
+    driver second, and asked where they were the engineer said pole.
+
+    CrewChief guards the same value twice and calls it what it is."""
+    reader = _live_quali(PlayerCarPosition=0, PlayerCarClassPosition=0)
+    reader.session_blob["SessionInfo"]["Sessions"][0]["ResultsPositions"] = []
+    assert reader._live_positions() == (None, None)
+
+
+def test_position_falls_back_to_the_published_results_table():
+    """The live channel drops out; the session's own timing table does not.
+    Same order of sources CrewChief reads them in."""
+    reader = _live_quali(PlayerCarPosition=0, PlayerCarClassPosition=0)
+    assert reader._live_positions() == (2, 2)
+
+
+def test_the_results_table_numbers_its_two_columns_differently():
+    """Not a transcription slip. Three captured sessions all show
+    `Position: 1, ClassPosition: 0` for the leader — one-based overall,
+    zero-based in class, in the same row. QualifyResultsInfo has both
+    zero-based instead. Reading them alike moves the driver up a place."""
+    reader = _live_quali(PlayerCarPosition=0, PlayerCarClassPosition=0)
+    assert reader._classified_position() == (2, 2)
+
+
+def test_a_published_position_is_preferred_to_the_results_table():
+    """The live channel is the current one whenever it has an answer."""
+    assert _live_quali()._live_positions() == (2, 2)
+
+
+# ── What a qualifying session actually gives the driver ─────────────
+
+
+def test_the_qualifying_format_is_read_and_not_assumed():
+    """The engineer treated the session clock as the driver's budget and
+    offered eight minutes of running to a driver with two laps. iRacing
+    publishes all of it: Lone against Open Qualify, the lap allowance, and
+    how the result is scored."""
+    reader = _live_quali()
+    assert reader._qualifying_format() == {
+        "solo": True, "scoring": "best lap", "laps_to_average": None}
+    # SessionLaps in qualifying is an allowance, not a race distance.
+    assert reader._laps_total() == 2
+
+
+def test_an_open_qualifying_session_is_not_a_lone_one():
+    reader = _live_quali()
+    reader.session_blob["SessionInfo"]["Sessions"][0]["SessionType"] = "Open Qualify"
+    assert reader._qualifying_format()["solo"] is False
+
+
+def test_an_unpublished_qualifying_format_is_not_filled_in_with_the_usual_one():
+    """A format nobody published is unknown. Defaulting to the common case
+    would be the same confident guess in a quieter voice."""
+    reader = _Reader({"SessionNum": 0}, {"SessionInfo": {"Sessions": [
+        {"SessionNum": 0, "SessionType": "Qualifying"}]}})
+    assert reader._qualifying_format() == {
+        "solo": None, "scoring": "", "laps_to_average": None}
+
+
+def test_an_averaged_qualifying_format_is_read_from_the_session():
+    """Series differ, and an averaged result changes what a driver should do
+    with a scruffy lap. SessionNumLapsToAvg is published per session — a
+    captured session carries 4."""
+    reader = _live_quali()
+    reader.session_blob["SessionInfo"]["Sessions"][0]["SessionNumLapsToAvg"] = 4
+    assert reader._qualifying_format()["laps_to_average"] == 4

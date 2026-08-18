@@ -26,6 +26,18 @@ class TrackConfig:
     laps_total: Optional[int] = None
     track_name: str = ""
     session_type: str = ""                    # Race / Practice / Qualify
+    # How this qualifying session is actually run, straight from the session
+    # YAML rather than assumed. iRacing publishes "Lone Qualify" (out alone,
+    # a fixed lap allowance) and "Open Qualify" (everyone out together, the
+    # clock is the budget) as distinct session types, and session_kind()
+    # deliberately collapses both to "qualify" — these keep the difference
+    # the engineer needs, which is what ends the driver's run.
+    #
+    # None / "" where iRacing published nothing, which is a refusal: the
+    # format is then unknown, not assumed to be the common one.
+    solo_qualifying: Optional[bool] = None
+    qualify_scoring: str = ""                 # "best lap", or an averaged format
+    laps_to_average: Optional[int] = None     # SessionNumLapsToAvg
     # Which segment of the weekend is running. Practice, qualifying and the
     # race are separate sessions under one SubSessionID, and the lap history
     # spans all of them — this is what tells them apart.
@@ -258,11 +270,16 @@ class CarTelemetry:
     # recomputes at each start/finish crossing, so it lags by up to a lap.
     # iRacing's classification — what the driver sees and what decides the
     # result. Compare class_position against this, never against track order.
-    position: int = 0
-    official_position: int = 0
+    #
+    # None where iRacing has not classified the car: before a first timed
+    # lap, in the garage, or when the server is not transmitting it. The
+    # channel says 0 for that, which is not a place and must never be
+    # rendered as one — see _position() in the reader.
+    position: Optional[int] = None
+    official_position: Optional[int] = None
     # Who is physically ahead right now, which differs mid-lap and after a
     # stop. Useful for rivals, misleading as "your position".
-    on_track_position: int = 0
+    on_track_position: Optional[int] = None
     speed: float = 0.0
     rpm: int = 0
     gear: str = ""
