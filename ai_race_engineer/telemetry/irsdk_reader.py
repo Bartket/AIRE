@@ -394,6 +394,27 @@ def _count(value: Any) -> Optional[int]:
     return number if number >= 0 else None
 
 
+def _position(value: Any) -> Optional[int]:
+    """Running or finishing places — 0 means unclassified, not first.
+
+    Zero is not missing, but for a position it is also not a place: iRacing
+    publishes 0 for a car it has not classified yet, and three captured
+    sessions show it scattered mid-field (`CarIdxPosition: [0, 10, 9, 2, 4,
+    1, 0, ...]`) rather than only before the start. CrewChief guards the
+    same value twice and calls it what it is.
+
+    So this is the one counter that must not go through _count(): reading
+    the sentinel as a number put "P0" in the prompt beside a running order
+    that listed the driver second, and the engineer resolved the pair by
+    calling pole.
+    """
+    try:
+        place = int(value)
+    except (TypeError, ValueError):
+        return None
+    return place if place >= 1 else None
+
+
 def _optional_bool(value: Any) -> Optional[bool]:
     """A published false is data; an absent channel is not false."""
     return None if value is None else bool(value)
@@ -1044,6 +1065,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
         standings, field_size, fastest = self._standings()
         grid, grid_class = self._grid_position()
         results = self._session_results()
+        qualifying = self._qualifying_format()
         player = self._player()
 
         track = TrackConfig(
@@ -1081,6 +1103,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
             lead_changes=results["lead_changes"],
             time_remaining=_duration(self._get("SessionTimeRemain")),
             time_total=_duration(self._get("SessionTimeTotal")),
+            solo_qualifying=qualifying["solo"],
+            qualify_scoring=qualifying["scoring"],
+            laps_to_average=qualifying["laps_to_average"],
         )
 
         per_lap = self._fuel_per_lap()
@@ -1149,7 +1174,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
             position=live_position,
             class_position=live_class_position,
             on_track_position=live_position,
-            official_position=int(self._get("PlayerCarPosition", 0) or 0),
+            official_position=_position(self._get("PlayerCarPosition")),
             speed=float(self._get("Speed", 0.0) or 0.0) * 3.6,  # m/s → km/h
             rpm=int(self._get("RPM", 0) or 0),
             gear=_gear_label(self._get("Gear")),
@@ -1446,13 +1471,50 @@ class iRacingTelemetryReader(TelemetryAdapter):
         return str(self._current_session().get("SessionType") or "")
 
     def _laps_total(self) -> Optional[int]:
-        """Scheduled race distance, when the session is lap-limited."""
+        """Scheduled distance, when the session is lap-limited.
+
+        In a race this is the race length. In qualifying it is the lap
+        allowance — captured sessions show `SessionType: Lone Qualify` with
+        `SessionLaps: 2` — which is a different thing and is why the block
+        must not label it as a race distance. What one of those laps is
+        spent on (out lap, flier, in lap) iRacing does not say, so nothing
+        here splits it.
+        """
         laps = self._current_session().get("SessionLaps")
         # iRacing writes the string "unlimited" for timed sessions.
         try:
             return int(laps)
         except (TypeError, ValueError):
             return None
+
+    def _qualifying_format(self) -> Dict[str, Any]:
+        """How this qualifying session is run, as iRacing publishes it.
+
+        The engineer had no way to know that a qualifying session is usually
+        a lap allowance inside a window rather than a stretch of time to keep
+        trying in, so it read the session clock as the driver's budget and
+        offered them eight minutes of running when they had two laps.
+
+        Nothing here is inferred from the series or the track. `SessionType`
+        separates Lone from Open Qualify, `SessionLaps` carries the allowance
+        when there is one, and the scoring format — a single best lap, or an
+        average over `SessionNumLapsToAvg` laps — comes from WeekendOptions,
+        which is what makes an averaged-lap series readable rather than
+        guessed at.
+        """
+        kind = self._current_session().get("SessionType") or ""
+        weekend = self._session("WeekendInfo", {}) or {}
+        options = weekend.get("WeekendOptions") or {}
+        name = str(kind).strip().lower()
+        return {
+            # Neither string present means the format was not published; that
+            # is None, and never a default to the commoner of the two.
+            "solo": (True if "lone" in name else
+                     False if "open" in name else None),
+            "scoring": _roster_text(options.get("QualifyScoring")),
+            "laps_to_average": _count(
+                self._current_session().get("SessionNumLapsToAvg")) or None,
+        }
 
     def _player_idx(self) -> Optional[int]:
         """The driver's own car index, or None when it is not published.
@@ -1542,6 +1604,33 @@ class iRacingTelemetryReader(TelemetryAdapter):
                     results["laps_led"] = _count(row.get("LapsLed"))
                     break
         return results
+
+    def _classified_position(self) -> Tuple[Optional[int], Optional[int]]:
+        """The driver's place from the session's own published results table.
+
+        SessionInfo:Sessions:ResultsPositions is what the timing screen
+        shows, and it is filled in while practice and qualifying are still
+        running, not only once they are official. It is also what is left
+        when the live channel reports an unclassified 0.
+
+        The two keys are indexed differently, which is not a transcription
+        slip: captured sessions show `Position: 1, ClassPosition: 0` for the
+        leader, so Position is one-based and ClassPosition is zero-based in
+        the same row. QualifyResultsInfo, read by _grid_position(), has both
+        zero-based instead. Reading them all the same way puts the driver a
+        place further up than they are, which is the failure this whole
+        function exists to stop.
+        """
+        idx = self._player_idx()
+        if idx is None:
+            return None, None
+        for row in self._current_session().get("ResultsPositions") or []:
+            if _int_or(row.get("CarIdx"), -1) != idx:
+                continue
+            in_class = _count(row.get("ClassPosition"))
+            return (_position(row.get("Position")),
+                    None if in_class is None else in_class + 1)
+        return None, None
 
     def _laps_remaining(self) -> Optional[int]:
         """Laps left, or None for a timed session.
@@ -1865,7 +1954,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._laps.append(LapRecord(
             lap=completed,
             time=round(lap_time, 3),
-            position=_count(self._get("PlayerCarPosition")),
+            position=_position(self._get("PlayerCarPosition")),
             fuel_left=_positive(self._get("FuelLevel")),
             clean=not dirty,
             note=reason,
@@ -2120,15 +2209,22 @@ class iRacingTelemetryReader(TelemetryAdapter):
             ranks[idx] = (rank, per_class[class_id])
         return ranks
 
-    def _live_positions(self) -> Tuple[int, Optional[int]]:
+    def _live_positions(self) -> Tuple[Optional[int], Optional[int]]:
         """The driver's own running order, overall and in class, 1-based.
 
         Falls back to the classification when the driver is not in the live
         order at all — in the garage, or a car index the session YAML does
         not know about — rather than inventing a rank.
+
+        None means iRacing has not placed the car, which is a refusal and
+        never a position. Two sources, because the live channel goes to 0
+        while the published table still has the answer — the same order
+        CrewChief reads them in.
         """
-        official = int(self._get("PlayerCarPosition", 0) or 0)
-        official_class = _count(self._get("PlayerCarClassPosition"))
+        official = _position(self._get("PlayerCarPosition"))
+        official_class = _position(self._get("PlayerCarClassPosition"))
+        if official is None:
+            official, official_class = self._classified_position()
 
         my_idx = self._get("PlayerCarIdx", -1)
         if my_idx is None or my_idx < 0:

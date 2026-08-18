@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .config import AppConfig
 from .llm import LLMClient, NO_ANSWER
-from .telemetry import TelemetrySnapshot
+from .telemetry import TelemetrySnapshot, session_kind
 from .text import normalise_question
 
 
@@ -68,6 +68,25 @@ def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[s
             failures.append("fuel range spans the finish but answer is not marginal")
         if "pit now" in low or "stop now" in low:
             failures.append("marginal fuel was turned into an immediate stop")
+
+    # Qualifying is a lap allowance inside a window, not a stretch of time
+    # to keep trying in. The engineer read the session clock as the driver's
+    # budget and offered eight more minutes of running to a driver who had
+    # two laps left, so an answer about how much running is left may not be
+    # built from the clock where iRacing published an allowance.
+    if session_kind(str(snapshot.get("session_type") or "")) == "qualify":
+        asking_how_long = any(word in q for word in (
+            "how long", "how much time", "time left", "how many laps",
+            "laps left", "time remaining"))
+        if asking_how_long:
+            # The trace records the route but not which tools ran, so this
+            # grades the answer rather than how it was reached: a session
+            # with a published allowance answered purely in minutes is the
+            # clock being read as the budget, whatever produced it.
+            if (snapshot.get("laps_total") and "minute" in low
+                    and "lap" not in low):
+                failures.append("qualifying budget answered from the clock, "
+                                "not the published lap allowance")
 
     finished = bool(snapshot.get("finished"))
     if not finished and len(spoken.split()) > 45:
