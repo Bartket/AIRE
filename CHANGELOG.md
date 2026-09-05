@@ -6,7 +6,38 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
-_Nothing yet._
+### Fixed
+
+- Asking about fuel or tyres could be answered with a pit-command refusal,
+  on the shipped default where pit commands are switched off. The classifier
+  that reads natural pit instructions ran before the setting was checked, so
+  ordinary radio like "give me an update on fuel" bought a model round trip
+  it could never use, and where the classifier misread the question the
+  driver was told "I couldn't safely interpret that pit request" about a
+  feature they had never enabled. An explicit "pit stop ..." still says the
+  setting is off; everything else is now answered as the question it was.
+- The spoken fuel plan ran to 76 words on a timed race that was short on
+  fuel — around half a minute of radio, spoken across several corners, most
+  of it answering something that had not been asked. Nothing was holding it
+  to a length: the 25-word rule lives in the system prompt, and this string
+  reaches the driver without a model in the path. It is now a headline plus
+  only the clauses that fit the radio, worst case 28 words. The full text is
+  unchanged for the model, which still receives every clause.
+- A question about the car ahead could arrive with no car ahead in it. The
+  telemetry block is compacted for single-topic questions on the assumption
+  that a calculator can fetch back whatever was cut, which is not true with
+  tool calling switched off or after a provider has rejected it. The block is
+  no longer compacted on that path.
+
+### Added
+
+- Stage timings for each exchange — speech recognition, the model, synthesis,
+  the radio effect, ducking and playback, plus time to first audio — in the
+  diagnostic trace and on the status panel. The pipeline previously had no
+  timing in it at all.
+- Token counters per exchange in the diagnostic trace, including prompt-cache
+  reads and writes, so the cost of a question is a reading rather than an
+  estimate.
 
 ## 0.2.0
 
