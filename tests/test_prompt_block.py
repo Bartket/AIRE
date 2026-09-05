@@ -183,3 +183,36 @@ def test_a_finished_qualifying_session_is_not_announced_as_a_finished_race():
     block = PromptBuilder.format_telemetry(car, _quali_track(finished=True), "Bart")
     assert "RACE OVER" not in block
     assert "QUALIFYING OVER — Bart qualified P2" in block
+
+
+def test_a_compacted_block_is_only_used_when_a_tool_can_fetch_the_rest():
+    """Focus filtering assumes the model can ask for what was cut.
+
+    The pace group keeps lap times and drops the rival lines and the running
+    order. That is a fair trade while `driver_report` is one tool call away.
+    With tools off — by setting, or because the provider rejected them for the
+    session — nothing can fetch them back, and "am I faster than the car
+    ahead?" arrived with no car ahead anywhere in it.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import Rival, TelemetrySnapshot
+
+    car = _car(position=4,
+               ahead=Rival(name="Rossi", car_number="13", position=3, gap=1.2),
+               behind=Rival(name="Silva", car_number="16", position=5, gap=0.8))
+    track = TrackConfig(session_type="Race", laps_remaining=12,
+                        field=[Rival(name="Rossi", position=3),
+                               Rival(name="You", position=4, is_player=True)])
+    snapshot = TelemetrySnapshot(car, track)
+    builder = PromptBuilder(AppConfig())
+    question = "Am I faster than the car ahead?"
+
+    without_tools = builder.build_user_turn(question, snapshot, tools_enabled=False)
+    assert "- Ahead: Rossi" in without_tools
+    assert "Running order" in without_tools
+
+    # Still compacted where a calculator can supply what is missing, or the
+    # saving this filter exists for disappears.
+    with_tools = builder.build_user_turn(question, snapshot, tools_enabled=True)
+    assert "- Ahead: Rossi" not in with_tools
+    assert len(with_tools) < len(without_tools)

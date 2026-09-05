@@ -8,7 +8,7 @@ completed item gets its own commit, so `git log --oneline main..HEAD` is the oth
 half of this file. Run `uv run pytest tests/ -q` before continuing — the tree
 should be green between items.
 
-**Next up:** item 4 (F7) — focus filter only when tools are enabled.
+**Next up:** item 5 (F3) — stage timings in the trace and `status()`.
 
 **Baseline:** 365 tests passing at `f1e7254`.
 
@@ -66,10 +66,13 @@ should be green between items.
   case-insensitive, because the stay-out call is its own sentence now. Its
   intent is unchanged and the "pit now" half was already lowercased.
 
-- [ ] **4 · F7 — apply the focus filter only when tools are enabled**
+- [x] **4 · F7 — apply the focus filter only when tools are enabled**
   With `use_tools: off`, or after a provider rejected tools, the pace focus group
   strips `Ahead on track` and the running order from a question about the car ahead.
-  *Plan:* one-line guard in `prompt_builder.build_user_turn`.
+  *Done:* one-line guard in `prompt_builder.build_user_turn` — the filter now
+  reads `self._focus_prefixes(question) if tools_enabled else None`.
+  *Test:* `test_a_compacted_block_is_only_used_when_a_tool_can_fetch_the_rest`
+  asserts both directions, so the compaction saving is not quietly lost either.
 
 - [ ] **5 · F3 — stage timings in the diagnostic trace and `status()`**
   Per-stage milliseconds through one exchange: stt, pit_classifier, llm, tts, dsp,
