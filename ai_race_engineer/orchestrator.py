@@ -724,6 +724,26 @@ class Orchestrator:
             return "Pit command cancelled; nothing was changed.", "pit_command:cancelled"
 
         explicit = is_pit_command(question)
+        # Whether the feature is off is knowable before any of the work below,
+        # and the work below contains a model round trip. Deciding it here
+        # rather than after that call is what keeps the shipped default from
+        # paying for a write path it cannot take: `might_be_pit_instruction`
+        # is deliberately broad, so "give me an update on fuel" reached the
+        # classifier and the driver got whatever it made of a fuel question —
+        # at worst "I couldn't safely interpret that pit request", about a
+        # feature they had never switched on. An explicit `pit stop ...` is
+        # still told the setting is off, because recognising that prefix is a
+        # regex and costs nothing.
+        if not enabled:
+            if pending is not None:
+                self._clear_pending_pit_command()
+            if not explicit:
+                return None
+            return (
+                "Pit commands are off; enable the at-your-own-risk setting first.",
+                "pit_command:disabled",
+            )
+
         if not explicit and not might_be_pit_instruction(question):
             # Confirmation is single-use and must immediately follow its
             # read-back. Any other turn makes the held write unreachable —
@@ -774,11 +794,6 @@ class Orchestrator:
                 return str(exc), "pit_command:rejected"
         if plan is None:
             return "I couldn't safely interpret that pit request.", "pit_command:rejected"
-        if not enabled:
-            return (
-                "Pit commands are off; enable the at-your-own-risk setting first.",
-                "pit_command:disabled",
-            )
         ready, reason = self.telemetry.pit_commands_ready()
         if not ready:
             return f"I couldn't arm that command: {reason}.", "pit_command:not_ready"

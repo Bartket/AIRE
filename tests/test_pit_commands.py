@@ -403,6 +403,59 @@ def test_confirmation_expires_and_a_session_change_destroys_it(tmp_path):
     assert orch.telemetry.applied == []
 
 
+def test_a_disabled_feature_never_reaches_the_interpreter(tmp_path, monkeypatch):
+    """Classifying before checking the setting cost a round trip and a refusal.
+
+    `might_be_pit_instruction` is broad on purpose, so ordinary radio like
+    "give me an update on fuel" reaches it. With the feature off there is no
+    write to arm, and the model call that used to run before the `enabled`
+    check bought a second round trip, the latency of one, and — where the
+    classifier read a fuel question as a malformed pit request — a refusal
+    about a setting the driver had never switched on.
+    """
+    orch = _orchestrator(tmp_path, enabled=False)
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("the classifier ran with pit commands disabled")))
+    monkeypatch.setattr(orch.llm, "generate", lambda *_args: "Twelve litres.")
+    async def directly(function, *args):
+        return function(*args)
+    monkeypatch.setattr(asyncio, "to_thread", directly)
+
+    # The gate this question trips is what made it expensive.
+    assert might_be_pit_instruction("give me an update on fuel")
+
+    answered = asyncio.run(orch.ask("give me an update on fuel", speak=False))
+    assert answered["answer"] == "Twelve litres."
+
+    # The canonical form still names the setting: recognising it is a regex.
+    refused = asyncio.run(orch.ask("pit stop four tyres", speak=False))
+    assert "at-your-own-risk setting" in refused["answer"]
+    assert orch.telemetry.applied == []
+
+
+def test_an_enabled_feature_still_interprets_natural_phrasing(tmp_path, monkeypatch):
+    """The guard is about the setting, not about the phrasing.
+
+    Paired with the test above so the disabled shortcut cannot be widened into
+    one that stops natural pit instructions being understood at all.
+    """
+    orch = _orchestrator(tmp_path, enabled=True)
+    seen = []
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda request, _compounds: seen.append(request)
+        or PitCommandInterpretation("command", "pit stop four tyres"))
+    async def directly(function, *args):
+        return function(*args)
+    monkeypatch.setattr(asyncio, "to_thread", directly)
+
+    proposal = asyncio.run(orch.ask("new boots all round", speak=False))
+    assert seen == ["new boots all round"]
+    assert proposal["answer"] == "Confirm: four tyres; say confirm to commit."
+
+
 def test_commands_ship_off_and_the_ui_names_the_risk(tmp_path):
     assert _DEFAULT_CONFIG["pit_commands"]["enabled"] is False
     orch = _orchestrator(tmp_path, enabled=False)

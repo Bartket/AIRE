@@ -8,7 +8,7 @@ completed item gets its own commit, so `git log --oneline main..HEAD` is the oth
 half of this file. Run `uv run pytest tests/ -q` before continuing — the tree
 should be green between items.
 
-**Next up:** item 1 (F1) — guard the pit-command classifier behind `enabled`.
+**Next up:** item 2 (F2) — the calculator word-budget test.
 
 **Baseline:** 365 tests passing at `f1e7254`.
 
@@ -16,7 +16,7 @@ should be green between items.
 
 ## Now — correctness and cost
 
-- [ ] **1 · F1 — check `pit_commands.enabled` before calling the classifier**
+- [x] **1 · F1 — check `pit_commands.enabled` before calling the classifier**
   `orchestrator._handle_pit_command` runs the LLM interpreter before testing
   `enabled`, so the shipped default (disabled) still pays a model round trip for
   anything `might_be_pit_instruction` matches, and can answer a fuel question
@@ -24,9 +24,14 @@ should be green between items.
   *Plan:* early return when disabled and the text is not the canonical
   `pit stop ...` form. Explicit commands keep the "pit commands are off" message —
   that path is pure regex and costs nothing.
-  *Tests to add:* classifier never called when disabled; `"give me an update on
-  fuel"` reaches the ordinary answer path; explicit `pit stop ...` still reports
-  the feature is off. Check each fails with the guard reverted.
+  *Done:* guard sits immediately after `explicit = is_pit_command(...)`, so
+  nothing below it runs while the feature is off. The later `if not enabled`
+  became unreachable and was removed with it.
+  *Tests:* `test_a_disabled_feature_never_reaches_the_interpreter` and
+  `test_an_enabled_feature_still_interprets_natural_phrasing` in
+  `tests/test_pit_commands.py`. The second is the pair that stops the shortcut
+  being widened into one that breaks natural pit instructions.
+  *Bug-put-back:* confirmed — reverting the guard fails 2 tests. 367 passing.
 
 - [ ] **2 · F2 — word-budget assertion over every calculator**
   A test walking every `_TOOLS` entry across a snapshot matrix, asserting `spoken`
