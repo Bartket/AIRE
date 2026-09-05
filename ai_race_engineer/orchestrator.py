@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
@@ -54,6 +55,53 @@ def _is_repeat_request(text: str) -> bool:
     return normalise_question(text) in _REPEAT_REQUESTS
 
 
+class _Timings:
+    """Stage stopwatch for one exchange, in milliseconds.
+
+    The pipeline had no timing in it at all, so how long an answer takes was
+    an estimate rather than a reading — and the parts worth optimising could
+    only be argued about. This measures them.
+
+    A single field on the orchestrator is safe because `_busy` serialises the
+    pipeline: there is never a second exchange writing into this one. Stages
+    accumulate rather than overwrite, so a stage entered twice reports the
+    total spent in it.
+
+    Nothing here may raise. A measurement is not worth an answer.
+    """
+
+    def __init__(self) -> None:
+        self._started = time.perf_counter()
+        self._stages: Dict[str, float] = {}
+        self._first_audio: Optional[float] = None
+
+    @contextmanager
+    def stage(self, name: str):
+        began = time.perf_counter()
+        try:
+            yield
+        finally:
+            spent = (time.perf_counter() - began) * 1000.0
+            self._stages[name] = round(self._stages.get(name, 0.0) + spent, 1)
+
+    def mark_first_audio(self) -> None:
+        """When the first sample reaches the speakers, from the top of the turn.
+
+        The number the driver actually feels. With playback buffered this is
+        the whole pipeline; it is also the number streaming speech would move,
+        which is why it is recorded separately from the stage totals.
+        """
+        if self._first_audio is None:
+            self._first_audio = (time.perf_counter() - self._started) * 1000.0
+
+    def as_dict(self) -> Dict[str, Any]:
+        timings: Dict[str, Any] = dict(self._stages)
+        if self._first_audio is not None:
+            timings["first_audio"] = round(self._first_audio, 1)
+        timings["total"] = round((time.perf_counter() - self._started) * 1000.0, 1)
+        return timings
+
+
 def _irsdk_available() -> bool:
     """Whether the iRacing SDK could be imported at all (Windows only)."""
     try:
@@ -91,6 +139,10 @@ class Orchestrator:
         self._hotkey_error: Optional[str] = None
         self._snapshot: Optional[TelemetrySnapshot] = None
         self._snapshot_at: float = 0.0
+        # Stage timings for the exchange in flight, kept after it for the panel.
+        self._timings: Optional[_Timings] = None
+        self._last_timings: Optional[Dict[str, Any]] = None
+        self._pending_trace: Optional[Dict[str, Any]] = None
         self._session_key: Optional[tuple] = None
         self._pending_pit_command: Optional[PitCommandPlan] = None
         self._pending_pit_command_at: float = 0.0
@@ -317,6 +369,9 @@ class Orchestrator:
             "pit_commands_enabled": (
                 self.config.get("pit_commands", {}).get("enabled") is True),
             "pit_command_pending": self._pending_pit_command is not None,
+            # Stage milliseconds for the last completed exchange. The panel
+            # shows what the driver waited for and where it went.
+            "last_timings": self._last_timings,
         }
 
     def history(self) -> List[Dict[str, Any]]:
@@ -383,9 +438,19 @@ class Orchestrator:
         transcription: Optional[Transcription] = None,
         route: Optional[str] = None,
     ) -> None:
-        """Append one exchange and its preceding minute, rotating at 8 MB."""
+        """Stage one exchange and its preceding minute for `_flush_trace`.
+
+        Staged rather than written because the stages worth measuring — speech
+        synthesis, the radio DSP, playback — all happen after every caller of
+        this. Writing here recorded a turn that was only half over, and the
+        half it missed is the half the driver spends waiting.
+        """
         if not self._trace_enabled:
             return
+        # One turn stages one record, but a second must never silently
+        # discard the first: flush what is held before replacing it.
+        if self._pending_trace is not None:
+            self._flush_trace()
         now = time.monotonic()
         samples = []
         for stored in self._trace_samples:
@@ -406,6 +471,15 @@ class Orchestrator:
             "snapshot": None if snapshot is None else snapshot.to_dict(),
             "samples": samples,
         }
+        self._pending_trace = record
+
+    def _flush_trace(self) -> None:
+        """Write the staged record, now that the turn's timings are complete."""
+        record, self._pending_trace = self._pending_trace, None
+        if record is None:
+            return
+        if self._timings is not None:
+            record["timings_ms"] = self._timings.as_dict()
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
         try:
             self._trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -536,6 +610,9 @@ class Orchestrator:
         self.audio_player.play_beep(closing, float(audio_cfg.get("ptt_beep_volume", 0.35)))
 
     async def _handle_recording(self, wav_bytes: bytes) -> None:
+        # The clock starts where the driver stops talking, because that is
+        # when they start waiting.
+        self._timings = _Timings()
         try:
             # Bias recognition toward the drivers and numbers actually on
             # track, so a surname the model has never seen still lands.
@@ -547,16 +624,18 @@ class Orchestrator:
                 logger.exception("Could not build speech keyterms")
                 hints = None
             try:
-                transcription = await asyncio.to_thread(
-                    self.stt.transcribe_raw_result, wav_bytes, "audio.wav", hints)
+                with self._timings.stage("stt"):
+                    transcription = await asyncio.to_thread(
+                        self.stt.transcribe_raw_result, wav_bytes, "audio.wav", hints)
             except STTError:
                 if not hints:
                     raise
                 # The API rejects the whole request if one term is invalid.
                 # Falling back unbiased still gets the driver an answer.
                 logger.warning("Transcription rejected the keyterms; retrying without")
-                transcription = await asyncio.to_thread(
-                    self.stt.transcribe_raw_result, wav_bytes, "audio.wav", None)
+                with self._timings.stage("stt"):
+                    transcription = await asyncio.to_thread(
+                        self.stt.transcribe_raw_result, wav_bytes, "audio.wav", None)
         except STTError as exc:
             logger.error("Transcription failed: %s", exc)
             self._last_error = str(exc)
@@ -593,6 +672,11 @@ class Orchestrator:
             await self.ask(question, speak=True, kind="voice", _hold_lock=True,
                            _transcription=transcription)
         finally:
+            # The stt_guard path returns before `ask`, so its record and its
+            # timings are still waiting here.
+            if self._timings is not None:
+                self._last_timings = self._timings.as_dict()
+            self._flush_trace()
             self._status = "listening"
             self._busy.release()
 
@@ -614,6 +698,10 @@ class Orchestrator:
                 return {"error": "Busy handling another question"}
 
         try:
+            # A voice turn started the clock when the button came up; a typed
+            # one starts it here.
+            if not _hold_lock or self._timings is None:
+                self._timings = _Timings()
             self._status = "thinking"
             if _is_repeat_request(question):
                 # Deliberately returns before `_handle_pit_command`, so a
@@ -661,7 +749,8 @@ class Orchestrator:
                     logger.info("Not speaking: TTS key or audio device unavailable")
                 return entry
 
-            answer = await asyncio.to_thread(self.llm.generate, question, snapshot)
+            with self._timings.stage("llm"):
+                answer = await asyncio.to_thread(self.llm.generate, question, snapshot)
             entry = self._log_exchange(question, answer, kind)
             self._write_diagnostic_trace(
                 question, answer, kind, snapshot, _transcription,
@@ -683,6 +772,9 @@ class Orchestrator:
 
             return entry
         finally:
+            if self._timings is not None:
+                self._last_timings = self._timings.as_dict()
+            self._flush_trace()
             self._status = "listening" if self._running else "stopped"
             if acquired:
                 self._busy.release()
@@ -765,11 +857,12 @@ class Orchestrator:
                 # ordinary human phrasing rather than the canonical grammar.
                 pass
         if plan is None:
-            interpretation = await asyncio.to_thread(
-                self.llm.interpret_pit_command,
-                question,
-                [compound.name for compound in compounds],
-            )
+            with self._timings.stage("pit_classifier"):
+                interpretation = await asyncio.to_thread(
+                    self.llm.interpret_pit_command,
+                    question,
+                    [compound.name for compound in compounds],
+                )
             if interpretation.kind == "not_command":
                 return None
             if interpretation.kind == "ambiguous":
@@ -808,8 +901,12 @@ class Orchestrator:
     async def _speak(self, text: str, regenerate: bool = False) -> bool:
         """Synthesize, apply the radio effect, duck other audio, and play."""
         self._refresh_spoken_names()
+        # Never None in the pipeline; the fallback keeps a stray call measurable
+        # rather than fatal, because a measurement is not worth an answer.
+        timings = self._timings or _Timings()
         try:
-            pcm = await asyncio.to_thread(self.tts.synthesize, text, regenerate)
+            with timings.stage("tts"):
+                pcm = await asyncio.to_thread(self.tts.synthesize, text, regenerate)
         except TTSError as exc:
             logger.error("Speech synthesis failed: %s", exc)
             self._last_error = str(exc)
@@ -817,9 +914,10 @@ class Orchestrator:
 
         self._last_spoken_text = text
 
-        audio = pcm_to_float(pcm)
-        audio = self._apply_radio_effect(audio, self.tts.sample_rate)
-        audio = apply_volume(audio, self.config.audio.get("volume", 1.0))
+        with timings.stage("dsp"):
+            audio = pcm_to_float(pcm)
+            audio = self._apply_radio_effect(audio, self.tts.sample_rate)
+            audio = apply_volume(audio, self.config.audio.get("volume", 1.0))
 
         # Off the loop like everything either side of it: duck() enumerates
         # every WASAPI session and queries an interface per match, and doing
@@ -827,9 +925,13 @@ class Orchestrator:
         # exact moment the driver is being spoken to.
         ducked = False
         if self.config.ducking.get("enabled", True):
-            ducked = await asyncio.to_thread(self.ducking.duck)
+            with timings.stage("duck"):
+                ducked = await asyncio.to_thread(self.ducking.duck)
         try:
-            await asyncio.to_thread(self.audio_player.play_array, audio, self.tts.sample_rate)
+            timings.mark_first_audio()
+            with timings.stage("playback"):
+                await asyncio.to_thread(
+                    self.audio_player.play_array, audio, self.tts.sample_rate)
         except Exception as exc:
             logger.error("Playback failed: %s", exc)
             self._last_error = f"Playback failed: {exc}"

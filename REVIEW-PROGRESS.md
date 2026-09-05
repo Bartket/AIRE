@@ -8,7 +8,7 @@ completed item gets its own commit, so `git log --oneline main..HEAD` is the oth
 half of this file. Run `uv run pytest tests/ -q` before continuing — the tree
 should be green between items.
 
-**Next up:** item 5 (F3) — stage timings in the trace and `status()`.
+**Next up:** item 6 (F5) — log OpenRouter cache counters into the trace.
 
 **Baseline:** 365 tests passing at `f1e7254`.
 
@@ -74,11 +74,21 @@ should be green between items.
   *Test:* `test_a_compacted_block_is_only_used_when_a_tool_can_fetch_the_rest`
   asserts both directions, so the compaction saving is not quietly lost either.
 
-- [ ] **5 · F3 — stage timings in the diagnostic trace and `status()`**
+- [x] **5 · F3 — stage timings in the diagnostic trace and `status()`**
   Per-stage milliseconds through one exchange: stt, pit_classifier, llm, tts, dsp,
   duck, playback, plus `first_audio_ms` and `total_ms`.
-  *Out of scope here:* P50/P95 over ≥20 real questions — that needs a live session
-  and is the verification step, not the change.
+  *Done:* `_Timings` on the orchestrator, one per exchange, clock starting at
+  button-up for a voice turn and at `ask()` for a typed one. Stages: stt,
+  pit_classifier, llm, tts, dsp, duck, playback, plus `first_audio` and `total`.
+  Surfaced as `timings_ms` in the trace and `last_timings` on `status()`.
+  *Design note:* the trace record is now **staged** during the turn and flushed
+  after it. Written where it used to be, it recorded a turn that was half over
+  and missed synthesis, DSP and playback — the half the driver spends waiting.
+  Staging twice flushes the held record rather than dropping it.
+  *Tests:* `tests/test_telemetry_trace.py`. Two existing tests now call
+  `_flush_trace()` because the write is deferred; their assertions are unchanged.
+  *Out of scope here:* P50/P95 over ≥20 real questions — that needs a live
+  session and is the verification step, not the change.
 
 - [ ] **6 · F5 — log OpenRouter cache counters into the trace**
   Read `usage.prompt_tokens_details.cached_tokens` and `cache_write_tokens` off
