@@ -78,3 +78,40 @@ def test_llm_memory_resets_on_a_same_id_session_restart(tmp_path):
     orch._adopt_session(restarted)
 
     assert not orch.llm._history
+
+
+def test_cache_counters_are_read_back_rather_than_assumed():
+    """Prompt caching fails silently when the prefix is under the minimum.
+
+    Claude Haiku 4.5 will not cache below 4,096 tokens and AIRE's static
+    prefix is around 1,340, so markers would be accepted and nothing would
+    cache — with no error to say so. That makes `cached` a number to read,
+    not a saving to assume, which is what this records.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+
+    client = LLMClient(AppConfig())
+    client.reset_usage()
+    client._record_usage({
+        "prompt_tokens": 2300, "completion_tokens": 41,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+    })
+    # A tool round trip re-sends the same prefix, so counters accumulate.
+    client._record_usage({
+        "prompt_tokens": 2400, "completion_tokens": 18,
+        "prompt_tokens_details": {"cached_tokens": 0},
+    })
+
+    usage = client.last_usage
+    assert usage["calls"] == 2
+    assert usage["prompt"] == 4700
+    assert usage["cached"] == 0
+
+    # A provider that reports nothing must not be recorded as zero tokens:
+    # absent and zero are different readings and only one of them is a fact.
+    client.reset_usage()
+    client._record_usage({"prompt_tokens": 100})
+    assert "cached" not in client.last_usage
+    client._record_usage(None)
+    assert client.last_usage["prompt"] == 100

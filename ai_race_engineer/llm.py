@@ -172,6 +172,9 @@ class LLMClient:
         # Raised for post-race debriefs; None means use the configured limit.
         self._reply_budget: Optional[int] = None
         self._last_route = "none"
+        # Token counters for the turn in flight, accumulated across every
+        # call it makes — the pit classifier and the tool round trip included.
+        self._usage: Dict[str, int] = {}
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -187,6 +190,23 @@ class LLMClient:
     def last_route(self) -> str:
         """How the last answer was produced, for traces and replay evals."""
         return self._last_route
+
+    @property
+    def last_usage(self) -> Dict[str, int]:
+        """Token counters for the current turn, cache reads and writes included.
+
+        `cached` is the measurement that decides whether prompt caching is
+        worth implementing here. The static prefix is around 1,340 tokens and
+        Claude Haiku 4.5 will not cache below 4,096, so the expected reading
+        on the shipped default is a flat zero — with no error to say so, which
+        is exactly why it has to be read rather than assumed.
+        """
+        return dict(self._usage)
+
+    def reset_usage(self) -> None:
+        """Start a new turn's counters. Called by the orchestrator, not here,
+        because a turn can be a pit classification with no `generate` in it."""
+        self._usage = {}
 
     def reset_history(self) -> None:
         self._history.clear()
@@ -523,6 +543,8 @@ If the requested tyre type is not in that list, use ambiguous."""
         if isinstance(result.get("error"), dict):
             raise LLMError(result["error"].get("message", "unknown provider error"))
 
+        self._record_usage(result.get("usage"))
+
         choices = result.get("choices") or []
         if not choices:
             raise LLMError("Response contained no choices")
@@ -539,6 +561,28 @@ If the requested tyre type is not in that list, use ambiguous."""
                 messages, max_tokens=max_tokens, tools=tools,
                 temperature=temperature)
         return choices[0].get("message") or {}
+
+    def _record_usage(self, usage: Any) -> None:
+        """Accumulate one response's token counts. Never raises.
+
+        Providers vary in what they report and OpenRouter nests the cache
+        counters under `prompt_tokens_details`, so anything missing is simply
+        not added rather than defaulted to a number that would read as fact.
+        """
+        if not isinstance(usage, dict):
+            return
+        details = usage.get("prompt_tokens_details")
+        details = details if isinstance(details, dict) else {}
+        for key, value in (
+            ("calls", 1),
+            ("prompt", usage.get("prompt_tokens")),
+            ("completion", usage.get("completion_tokens")),
+            ("cached", details.get("cached_tokens")),
+            ("cache_written", details.get("cache_write_tokens")),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            self._usage[key] = self._usage.get(key, 0) + int(value)
 
     def close(self) -> None:
         self._client.close()

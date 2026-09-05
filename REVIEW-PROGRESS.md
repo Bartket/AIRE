@@ -8,7 +8,7 @@ completed item gets its own commit, so `git log --oneline main..HEAD` is the oth
 half of this file. Run `uv run pytest tests/ -q` before continuing — the tree
 should be green between items.
 
-**Next up:** item 6 (F5) — log OpenRouter cache counters into the trace.
+**Next up:** _(Now phase complete — Next phase starts at item 7, the push-to-talk interrupt)_
 
 **Baseline:** 365 tests passing at `f1e7254`.
 
@@ -90,12 +90,19 @@ should be green between items.
   *Out of scope here:* P50/P95 over ≥20 real questions — that needs a live
   session and is the verification step, not the change.
 
-- [ ] **6 · F5 — log OpenRouter cache counters into the trace**
+- [x] **6 · F5 — log OpenRouter cache counters into the trace**
   Read `usage.prompt_tokens_details.cached_tokens` and `cache_write_tokens` off
   every response, accumulate per exchange, surface in the trace record.
-  *Expectation to check live:* zero on `anthropic/claude-haiku-4.5`, because the
-  ~1,340-token static prefix is below that model's 4,096-token minimum. Confirming
-  that zero is what closes or reopens item 27.
+  *Done:* `LLMClient._record_usage` accumulates `calls`, `prompt`, `completion`,
+  `cached` and `cache_written` across every call a turn makes — the pit
+  classifier and the tool round trip included. Reset per turn by the
+  orchestrator, not by `generate`, because a pit turn never calls `generate`.
+  Written to the trace as `usage`.
+  *Absent is not zero:* a provider that reports no cache counters leaves the
+  key out rather than recording 0, so the live reading cannot be misread.
+  *Still to do, and it needs a live session:* confirm `cached` is 0 on
+  `anthropic/claude-haiku-4.5`. That zero is what closes or reopens item 27.
+  *Test:* `test_cache_counters_are_read_back_rather_than_assumed`.
 
 ---
 

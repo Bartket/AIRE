@@ -480,6 +480,9 @@ class Orchestrator:
             return
         if self._timings is not None:
             record["timings_ms"] = self._timings.as_dict()
+        usage = self.llm.last_usage
+        if usage:
+            record["usage"] = usage
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
         try:
             self._trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -702,6 +705,9 @@ class Orchestrator:
             # one starts it here.
             if not _hold_lock or self._timings is None:
                 self._timings = _Timings()
+            # Turn-scoped, and reset here rather than in `generate` because a
+            # turn can be a pit classification with no `generate` in it.
+            self.llm.reset_usage()
             self._status = "thinking"
             if _is_repeat_request(question):
                 # Deliberately returns before `_handle_pit_command`, so a
