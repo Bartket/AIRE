@@ -2523,7 +2523,10 @@ def test_common_fuel_question_bypasses_the_model_entirely():
 
     answer = client.generate("Do I have enough fuel?", telemetry)
 
-    assert "stay out for now" in answer
+    # Case-insensitive because the stay-out call is its own sentence now, not
+    # a trailing clause. What matters is that a required stop still reaches
+    # the driver as "not yet" — that is the bug this guards.
+    assert "stay out for now" in answer.lower()
     assert "pit now" not in answer.lower()
     assert answer == rm.fuel_plan(car, track)["spoken"]
     assert len(calls) == 0
@@ -2874,3 +2877,109 @@ def test_a_finished_qualifying_session_is_not_a_race_that_was_finished():
     car = _car(position=2, class_position=2)
     track = TrackConfig(session_type="Lone Qualify", finished=True)
     assert rm.position_report(car, track)["spoken"] == "You qualified P2."
+
+
+# ── The radio budget ────────────────────────────────────────────────
+
+def _budget_scenarios():
+    """Cars and sessions that between them reach every wording branch.
+
+    Weighted toward the shapes that grew long: a tank that will not reach the
+    flag, a timed race where the lap count is an estimate, and a last lap that
+    disagrees with the average. Those three clauses stack, and stacked they
+    were the 76-word answer.
+    """
+    short = dict(fuel_level=12.0, fuel_capacity=60.0, fuel_per_lap=3.4,
+                 fuel_burn_samples=6, fuel_burn_min=3.2, fuel_burn_max=3.7,
+                 avg_lap_time=92.0, lap_progress=0.4)
+    ahead = Rival(name="Rossi", car_number="13", position=3, gap=1.2,
+                  gap_metres=48.0, best_lap=90.4)
+    behind = Rival(name="Silva", car_number="16", position=5, gap=0.8,
+                   gap_metres=32.0, best_lap=91.6)
+    lap_limited = TrackConfig(session_type="Race", laps_remaining=14,
+                              current_lap=20, laps_total=34, field=_field())
+    timed = TrackConfig(session_type="Race", laps_remaining=None,
+                        time_remaining=1300.0, current_lap=20, field=_field())
+    return [
+        ("short, lap-limited", CarTelemetry(**short, position=4), lap_limited),
+        ("short, timed", CarTelemetry(**short, position=4,
+                                      laps_to_go_is_estimate=True), timed),
+        ("short, timed, last lap high",
+         CarTelemetry(**short, position=4, laps_to_go_is_estimate=True,
+                      fuel_last_lap=5.0, fuel_last_lap_clean=True), timed),
+        ("short, last lap low",
+         CarTelemetry(**short, position=4, fuel_last_lap=1.9,
+                      fuel_last_lap_clean=True), lap_limited),
+        ("marginal", CarTelemetry(fuel_level=47.0, fuel_capacity=60.0,
+                                  fuel_per_lap=3.3, fuel_burn_samples=6,
+                                  fuel_burn_min=3.1, fuel_burn_max=3.6,
+                                  avg_lap_time=92.0, position=4), lap_limited),
+        ("comfortable", CarTelemetry(fuel_level=55.0, fuel_capacity=60.0,
+                                     fuel_per_lap=3.2, fuel_burn_samples=6,
+                                     fuel_burn_min=3.1, fuel_burn_max=3.3,
+                                     avg_lap_time=92.0, position=4), lap_limited),
+        ("no burn measured yet",
+         CarTelemetry(fuel_level=40.0, fuel_capacity=60.0, position=4),
+         lap_limited),
+        ("in a battle", CarTelemetry(**short, position=4, ahead=ahead,
+                                     behind=behind,
+                                     closing_ahead_status="confirmed",
+                                     closing_ahead_change=0.31,
+                                     closing_ahead_segments=3,
+                                     closing_behind_status="confirmed",
+                                     closing_behind_change=0.22,
+                                     closing_behind_segments=3), lap_limited),
+        ("leading", CarTelemetry(**short, position=1, behind=behind),
+         lap_limited),
+        ("practice", CarTelemetry(**short, position=4),
+         TrackConfig(session_type="Practice", time_remaining=1800.0,
+                     current_lap=8, field=_field())),
+    ]
+
+
+def _budget_arguments(name):
+    """Every required argument each calculator needs, as a list of kwargs."""
+    if name == "adjacent_gap_trend":
+        return [{"direction": "ahead"}, {"direction": "behind"}]
+    if name == "car_resources":
+        return [{"topic": topic} for topic in
+                ("pits", "tyres", "push to pass", "joker", "pit service")]
+    return [{}]
+
+
+def test_no_verbatim_calculator_exceeds_the_radio_budget():
+    """These reach the driver word for word, so nothing else caps their length.
+
+    fuel_plan hit 76 words on a timed race that was short on fuel — roughly
+    half a minute of radio, spoken over several corners, most of it answering
+    something that had not been asked. The system prompt's 25-word rule never
+    applied to it, because no model was involved: the terminal-tool path in
+    llm.py returns this string, and the deterministic router speaks it without
+    a model at all.
+    """
+    over = []
+    for label, car, track in _budget_scenarios():
+        for name in sorted(rm.SPOKEN_VERBATIM):
+            function = getattr(rm, name)
+            for kwargs in _budget_arguments(name):
+                spoken = function(car, track, **kwargs)["spoken"]
+                words = len(spoken.split())
+                if words > rm.SPOKEN_BUDGET_WORDS:
+                    over.append(f"{name} [{label}] {kwargs or ''}: "
+                                f"{words} words — {spoken}")
+    assert not over, "\n".join([
+        f"{len(over)} spoken result(s) over the "
+        f"{rm.SPOKEN_BUDGET_WORDS}-word radio budget:", *over])
+
+
+def test_the_verbatim_set_matches_what_llm_actually_speaks():
+    """Two lists that must agree are two lists that drift.
+
+    llm._TERMINAL_TOOLS is the tool-calling half; the deterministic router is
+    the other. If either grows a calculator that is not in SPOKEN_VERBATIM,
+    the budget above silently stops covering it.
+    """
+    from ai_race_engineer.llm import _TERMINAL_TOOLS
+
+    assert _TERMINAL_TOOLS <= rm.SPOKEN_VERBATIM
+    assert "race_control_report" in rm.SPOKEN_VERBATIM

@@ -8,7 +8,7 @@ completed item gets its own commit, so `git log --oneline main..HEAD` is the oth
 half of this file. Run `uv run pytest tests/ -q` before continuing — the tree
 should be green between items.
 
-**Next up:** item 2 (F2) — the calculator word-budget test.
+**Next up:** item 4 (F7) — focus filter only when tools are enabled.
 
 **Baseline:** 365 tests passing at `f1e7254`.
 
@@ -33,19 +33,38 @@ should be green between items.
   being widened into one that breaks natural pit instructions.
   *Bug-put-back:* confirmed — reverting the guard fails 2 tests. 367 passing.
 
-- [ ] **2 · F2 — word-budget assertion over every calculator**
+- [x] **2 · F2 — word-budget assertion over every calculator**
   A test walking every `_TOOLS` entry across a snapshot matrix, asserting `spoken`
   stays inside the budget while `finished` is false.
-  *Expected to fail on `fuel_plan` when first written (76 words measured). That
-  failure is the finding* — item 3 is what makes it pass. Do not soften the
-  threshold to make it green.
+  *Done:* `test_no_verbatim_calculator_exceeds_the_radio_budget`, driven by
+  `rm.SPOKEN_VERBATIM` and `rm.SPOKEN_BUDGET_WORDS` (30 words ≈ 12 s of radio;
+  the system prompt asks the model for 25). Paired with
+  `test_the_verbatim_set_matches_what_llm_actually_speaks` so `_TERMINAL_TOOLS`
+  cannot drift away from the budgeted set.
+  *Confirmed failing first:* 6 violations, all `fuel_plan`, 42–61 words. The
+  threshold was not moved to make it green. Every other verbatim calculator was
+  already inside budget, which narrowed item 3 to one function.
 
-- [ ] **3 · F2 — split calculator output into headline + clauses**
+- [x] **3 · F2 — split calculator output into headline + clauses**
   `fuel_plan` and `pit_window` build `spoken` from a headline plus a `clauses`
   dict; the terminal short-circuit in `llm.py` speaks the headline and only the
   clauses the question asked for.
-  *Invariant to keep:* no clause is ever rewritten by the model — selection only.
-  Structured fields must not move; plenty downstream reads them.
+  *Done:* only `fuel_plan` needed it. `spoken` is now headline + as many
+  clauses as the budget allows, chosen by `_FUEL_RADIO_ORDER` in
+  `race_math._radio`; `clauses` and `headline` are new result fields and no
+  existing field moved.
+  *Worst case measured:* 76 → 28 words.
+  *Guard that mattered:* `summary_lines` feeds the no-tools prompt and would
+  have been starved by a shorter `spoken`, so it now uses `full_spoken()`,
+  which rebuilds the complete text from the same sentences.
+  *Two clauses stayed in the radio on purpose:* the stop count (it is the call)
+  and the stay-out window (a required stop must never read as "pit now" — an
+  existing test guards that). The safety-car caveat outranks the window because
+  it can contradict the headline outright.
+  *Existing tests touched:* one assertion in
+  `test_common_fuel_question_bypasses_the_model_entirely` became
+  case-insensitive, because the stay-out call is its own sentence now. Its
+  intent is unchanged and the "pit now" half was already lowercased.
 
 - [ ] **4 · F7 — apply the focus filter only when tools are enabled**
   With `use_tools: off`, or after a provider rejected tools, the pace focus group

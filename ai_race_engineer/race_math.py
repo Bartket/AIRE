@@ -35,6 +35,38 @@ from .telemetry import (CarTelemetry, Rival, TelemetrySnapshot, TrackConfig,
 logger = logging.getLogger("race-engineer")
 
 
+# Calculators whose `spoken` reaches the driver word for word — either as a
+# terminal tool call, where llm.py returns it instead of asking the model to
+# paraphrase, or through the deterministic router, which never involves a
+# model at all. Everything else here is read by the model and rephrased, so
+# its wording is material rather than speech.
+#
+# Named here rather than in llm.py because two lists that must agree are two
+# lists that will drift, and the one that matters is the one next to the
+# functions it describes.
+SPOKEN_VERBATIM = frozenset({
+    "fuel_plan", "pit_window", "position_report", "adjacent_gap_trend",
+    "car_resources", "race_control_report",
+})
+
+# The radio budget for anything in SPOKEN_VERBATIM while a session is running.
+# The system prompt asks the model for 25 words; these bypass the model, so
+# nothing was holding them to it and fuel_plan reached 76 — about half a
+# minute of radio, arriving while the driver is braking. Slightly above 25
+# because a calculator has to name its units and a rival where the model
+# could lean on context.
+SPOKEN_BUDGET_WORDS = 30
+
+# Which fuel clauses earn the radio when they cannot all fit, most important
+# first. The stop count is the call itself. `extra_lap` and `estimate` both
+# stop a lap count being heard as firmer than it is, which is the failure
+# `laps_to_go_is_estimate` exists to prevent. `last_lap` can contradict the
+# headline outright — behind a safety car the tank goes further than the
+# racing average says — so it outranks the window, which has a calculator of
+# its own the driver can ask.
+_FUEL_RADIO_ORDER = ("stops", "extra_lap", "estimate", "last_lap", "window")
+
+
 # ── Result helpers ──────────────────────────────────────────────────
 
 def _no(reason: str, **extra: Any) -> Dict[str, Any]:
@@ -44,6 +76,47 @@ def _no(reason: str, **extra: Any) -> Dict[str, Any]:
 
 def _yes(spoken: str, **fields: Any) -> Dict[str, Any]:
     return {"available": True, "reason": "", "spoken": spoken, **fields}
+
+
+def _radio(headline: str, clauses: Dict[str, str],
+           order: Tuple[str, ...]) -> str:
+    """Headline plus as many clauses as the radio budget allows.
+
+    Priority order, not source order, because the worst case genuinely has
+    four things to say and saying all of them is what produced a half-minute
+    of radio. A clause that does not fit is not lost — it stays in `clauses`
+    for the model, and for the driver's next question.
+
+    Skips rather than stops, so a short low-priority clause still gets in
+    behind a long one that did not fit.
+    """
+    said = [headline]
+    words = len(headline.split())
+    for key in order:
+        clause = clauses.get(key)
+        if not clause:
+            continue
+        cost = len(clause.split())
+        if words + cost > SPOKEN_BUDGET_WORDS:
+            continue
+        said.append(clause)
+        words += cost
+    return " ".join(said)
+
+
+def full_spoken(result: Dict[str, Any]) -> str:
+    """Every clause, for a reader that is not the driver at speed.
+
+    `spoken` is the radio answer and deliberately leaves clauses out. Where
+    the whole picture is wanted — the no-tools prompt block, a debrief — this
+    is it. Still assembled from the same sentences, so nothing here was
+    written by a model or worked out twice.
+    """
+    clauses = result.get("clauses") or {}
+    if not clauses:
+        return result.get("spoken", "")
+    headline = result.get("headline") or result.get("spoken", "")
+    return " ".join([headline, *clauses.values()])
 
 
 def _laptime(value: Optional[float]) -> str:
@@ -626,10 +699,25 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     if capacity and capacity > 0:
         one_stop_covers_it = have + capacity >= needed
 
+    # A lap count derived from the clock moves as the pace does, so it is
+    # hedged wherever it is spoken. It used to be stated flat and corrected
+    # by a trailing sentence; that sentence is now a clause, and a clause is
+    # not guaranteed to be said, so the hedge has to live in the number.
+    laps_word = f"about {laps:.0f}" if timed_estimate else f"{laps:.0f}"
+
+    # `spoken` reaches the driver word for word on the terminal-tool and
+    # deterministic routes — no model trims it, and nothing else was holding
+    # it to the radio budget, which is how this reached 76 words. It now
+    # carries the headline plus only what changes the next few corners. The
+    # rest goes to `clauses`, which the model still receives in full when it
+    # is the one talking, so nothing is lost — it is simply not all said at
+    # once, to a driver who is braking.
+    clauses: Dict[str, str] = {}
+
     if margin >= 0:
         spare_laps = margin / per_lap
-        spoken = (f"Fuel is good — {have:.1f} {unit} for {laps:.0f} laps, "
-                  f"{margin:.1f} {unit} spare, about {spare_laps:.1f} laps in hand.")
+        headline = (f"Fuel is good — {have:.1f} {unit} for {laps_word} laps, "
+                    f"{margin:.1f} {unit} spare, about {spare_laps:.1f} laps in hand.")
         save = None
         save_basis = None
         stop_required = False
@@ -644,22 +732,23 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
             # not one the driver can lift and coast to when two are needed,
             # and the words and the numbers must not disagree.
             save = None
-            spoken = (f"We're short by {abs(margin):.1f} {unit}, about "
-                      f"{short_laps:.1f} laps.")
+            headline = (f"We're short by {abs(margin):.1f} {unit}, about "
+                        f"{short_laps:.1f} laps.")
             save_basis = ("no saving target exists — the shortfall is more than one "
                           "stop can put in the car. Do not work one out from these "
                           "numbers")
         elif save is not None:
-            spoken = (f"Fuel is short by {abs(margin):.1f} {unit}, about "
-                      f"{short_laps:.1f} laps — save {save:.2f} {unit} per lap or we stop.")
+            headline = (f"Fuel is short by {abs(margin):.1f} {unit}, about "
+                        f"{short_laps:.1f} laps — save {save:.2f} {unit} per lap or we stop.")
             save_basis = None
         else:
-            spoken = (f"We're short on fuel — about {laps_of_fuel:.1f} laps in the "
-                      f"tank at {per_lap:.2f} {unit} a lap, and {laps:.0f} laps to "
-                      f"run. That's more than you can save.")
+            headline = (f"We're short on fuel — about {laps_of_fuel:.1f} laps in the "
+                        f"tank, {laps_word} laps to run.")
             save_basis = ("no saving target exists — the shortfall is more than a "
                           "driver can lift and coast back. Do not work one out from "
                           "these numbers")
+            clauses["verdict"] = "That's more than you can save."
+            clauses["burn"] = f"You're using {per_lap:.2f} {unit} a lap."
 
         stop_required = save is None
         if stop_required:
@@ -669,29 +758,30 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
             pit_now = bool(stop_window.get("pit_now"))
             window_open = stop_window.get("window_open")
             if stops is None:
-                spoken += " A fuel stop is required"
+                clauses["stops"] = "A fuel stop is required."
                 if pit_now:
-                    spoken += "; I'd stop this lap because this tank is at its limit."
+                    clauses["window"] = "I'd stop this lap; the tank is at its limit."
                 elif latest is not None:
-                    spoken += f", but not now — stay out and stop by lap {latest}."
+                    clauses["window"] = f"Stay out for now, stop by lap {latest}."
                 else:
-                    spoken += ", but I haven't got the tank size to time it."
+                    clauses["window"] = "I haven't got the tank size to time it."
             else:
                 count = "One fuel stop is" if stops == 1 else f"{stops} fuel stops are"
-                spoken += f" {count} required."
+                clauses["stops"] = f"{count} required."
                 if pit_now:
-                    spoken += " I'd stop this lap; the first window closes now."
+                    clauses["window"] = "I'd stop this lap; the window closes now."
                 elif window_open:
-                    spoken += f" The first window is open and closes on lap {latest}."
+                    clauses["window"] = f"The window is open, closes lap {latest}."
                 else:
-                    spoken += (f" The first window is lap {earliest} to lap {latest}; "
-                               f"stay out for now.")
+                    clauses["window"] = (f"Stay out for now — the window is lap "
+                                         f"{earliest} to {latest}.")
 
     if estimated_from_clock:
-        spoken += (f" That's {laps:.0f} laps at your current pace — an estimate "
-                   f"from the clock, not a lap count.")
+        clauses["estimate"] = (f"That's about {laps:.0f} laps at your pace, an "
+                               f"estimate not a count.")
     if extra_lap_margin is not None and extra_lap_margin >= 0:
-        spoken += f" Even an extra timed lap leaves {extra_lap_margin:.1f} {unit} spare."
+        clauses["extra_lap"] = (f"Even an extra timed lap leaves "
+                                f"{extra_lap_margin:.1f} {unit} spare.")
 
     # If the last lap burnt far less than a racing lap, the driver is behind
     # a safety car or cruising, and the racing average is pessimistic. Saying
@@ -700,14 +790,18 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     if last is not None and per_lap > 0 and car.fuel_last_lap_clean is True:
         ratio = last / per_lap
         if ratio < 0.7:
-            spoken += (f" Last lap only used {last:.2f} {unit} though — if it stays "
-                       f"this slow you will go further than that.")
+            clauses["last_lap"] = (f"Last lap only used {last:.2f} {unit} — "
+                                   f"you'll go further.")
         elif ratio > 1.3:
-            spoken += (f" Last lap used {last:.2f} {unit}, well above your average — "
-                       f"that pace will not reach the flag.")
+            clauses["last_lap"] = (f"Last lap used {last:.2f} {unit}, well above "
+                                   f"average — that won't reach the flag.")
+
+    spoken = _radio(headline, clauses, _FUEL_RADIO_ORDER)
 
     return _yes(
         spoken,
+        headline=headline,
+        clauses=clauses,
         fuel_in_tank=round(have, 2),
         unit=unit,
         burn_last_lap=last,
@@ -2118,5 +2212,9 @@ def summary_lines(telemetry: Optional[TelemetrySnapshot]) -> List[str]:
         ("Pit window", pit_window(telemetry.car, telemetry.track)),
     ):
         if result["available"]:
-            lines.append(f"- {label}: {result['spoken']}")
+            # Every clause, not the radio answer: this goes into the prompt
+            # for the model to choose from, and it is choosing for a question
+            # the calculator has not seen. The trimming belongs at the point
+            # of speech, which is the other path.
+            lines.append(f"- {label}: {full_spoken(result)}")
     return lines
