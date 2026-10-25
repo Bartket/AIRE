@@ -29,7 +29,7 @@
     "openrouter": {
       "api_key": "",
       "endpoint": "https://openrouter.ai/api/v1",
-      "model": "anthropic/claude-haiku-4.5"
+      "model": "anthropic/claude-haiku-5.5"
     },
     "local": {
       "api_key": "",

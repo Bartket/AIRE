@@ -411,7 +411,7 @@ share one code path and differ only in base URL, model, and auth.
   "openrouter": {
     "api_key": "",                              // or $OPENROUTER_API_KEY
     "endpoint": "https://openrouter.ai/api/v1",
-    "model": "anthropic/claude-haiku-4.5"
+    "model": "anthropic/claude-haiku-5.5"
   }
 }
 ```
@@ -430,7 +430,8 @@ arithmetic, ignored tool calls, and answers running past a sentence.
 
 | Model | Smoke test |
 | --- | --- |
-| `anthropic/claude-haiku-4.5` | clean — the default, and what the prompts were written against |
+| `anthropic/claude-haiku-5.5` | clean — the default. Re-checked over five runs per probe: no failures in 125 checks, and about a tenth of 4.5's cost |
+| `anthropic/claude-haiku-4.5` | clean, and what the prompts were first written against — but only since AIRE stopped dropping an answer the model gave alongside its own tool call |
 | `google/gemini-2.5-flash` | clean, and cheaper |
 | `google/gemini-2.5-flash-lite` | **fails** — skipped tool calls, twice returned nothing at all |
 
@@ -722,6 +723,10 @@ sit in the same price tier, so the figures below still hold:
 | **Total** | **~$0.015** |
 
 A race in which you ask 30–60 questions costs roughly **$0.45–0.90**.
+
+Those figures are on Haiku 4.5. Haiku 5.5, now the default, measured about
+**$0.0007 a question** for the LLM line against 4.5's $0.0055 — so on 5.5 a
+question costs roughly a cent, and speech is most of it.
 Provider prices and credit plans can change, so treat these as measured usage,
 not a quote; the provider dashboards are authoritative for your account.
 

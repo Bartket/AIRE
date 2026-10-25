@@ -54,8 +54,11 @@ createApp({
       cacheStats: null,
       // Scored against the failure modes this app actually hits: inventing
       // corner names, doing arithmetic in its head, ignoring the tools,
-      // rambling past one sentence. Both of these passed every probe.
+      // rambling past one sentence. All of these passed every probe; Haiku
+      // 5.5 was re-checked over five runs, and Haiku 4.5 is clean only since
+      // the fix for a model falling silent after its own tool call.
       recommendedModels: [
+        'anthropic/claude-haiku-5.5',
         'anthropic/claude-haiku-4.5',
         'google/gemini-2.5-flash',
       ],

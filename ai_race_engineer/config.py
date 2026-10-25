@@ -103,7 +103,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
             # Falls back to the OPENROUTER_API_KEY environment variable.
             "api_key": "",
             "endpoint": "https://openrouter.ai/api/v1",
-            "model": "anthropic/claude-haiku-4.5",
+            "model": "anthropic/claude-haiku-5.5",
         },
         "local": {
             "api_key": "",

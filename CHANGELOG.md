@@ -8,6 +8,14 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- "How far am I behind the leader?" could be answered "I lost that one, say
+  again" — five times in five on Claude Haiku 4.5. The model gave its answer
+  in the same turn as calling a calculator, then said nothing after the
+  result because it already had, and AIRE only ever spoke the last turn. A
+  model that falls silent after its tool now gets the calculator's own
+  sentence spoken, never its own earlier text, which was written before the
+  calculator ran and so carries figures nothing has checked.
+
 - A model that thinks without showing its reasoning could answer with
   nothing. AIRE retries with more room when a model spends its whole budget
   thinking, but recognised that only from the reasoning text — and Claude
@@ -44,6 +52,12 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   had drifted apart. All four now share one.
 
 ### Changed
+
+- The default model is now Claude Haiku 5.5. Over five runs of each probe —
+  invented corner names, mental arithmetic, skipped calculators, inventing a
+  trend, reading out stale tyre figures, breaking character, running past a
+  sentence — it failed none of 125 checks, answered faster, and costs about a
+  tenth of Haiku 4.5 per question.
 
 - Moved to ElevenLabs' current speech models. Both the ones AIRE shipped with
   have been retired: `scribe_v1` is replaced by `scribe_v2`, and

@@ -208,3 +208,76 @@ def test_hidden_reasoning_still_earns_the_retry_with_room():
                   "completion_tokens_details": {"reasoning_tokens": 0}}}))[1]
     assert silent._chat([{"role": "user", "content": "?"}], max_tokens=80) == ""
     assert budgets == [80]
+
+
+def _scripted(replies):
+    """An LLMClient whose provider answers from a list, one per request."""
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+
+    class _Response:
+        def __init__(self, body):
+            self._body = body
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._body
+
+    queue = list(replies)
+    client = LLMClient(AppConfig({"llm": {"openrouter": {"api_key": "x"}}}))
+    client._client.post = lambda *_a, **_k: _Response(
+        {"choices": [queue.pop(0)]})
+    return client
+
+
+def _leader_snapshot():
+    from ai_race_engineer.telemetry import Rival
+
+    field = [Rival(name="Rossi", car_number="13", position=1, gap=None),
+             Rival(name="You", car_number="22", position=4, gap=5.89,
+                   is_player=True)]
+    return TelemetrySnapshot(CarTelemetry(position=4),
+                             TrackConfig(session_type="Race", field=field))
+
+
+def test_a_model_that_falls_silent_after_its_tool_is_answered_by_the_tool():
+    """Measured live: Haiku 4.5 went 5 for 5 on "how far behind the leader".
+
+    It answers in the same turn as the tool call, then returns nothing after
+    the result, having already said it. Only the final turn was spoken, so
+    the driver heard "I lost that one, say again" every time — and it took a
+    working gap_to to expose it, because a failing one made the model try
+    again in words.
+    """
+    from ai_race_engineer import race_math
+
+    snapshot = _leader_snapshot()
+    client = _scripted([
+        {"finish_reason": "tool_calls", "message": {
+            "content": "You're about six seconds back.",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "gap_to", "arguments": '{"target": "leader"}'}}]}},
+        {"finish_reason": "stop", "message": {"content": ""}},
+    ])
+
+    answer = client.generate("How far am I behind the leader?", snapshot)
+
+    computed = race_math.gap_to(snapshot.car, snapshot.track, "leader")["spoken"]
+    assert answer == computed
+    # Not the model's text from before the tool ran: nothing checked its figure.
+    assert "six seconds" not in answer
+
+
+def test_a_real_final_answer_is_never_replaced_by_the_tool_sentence():
+    client = _scripted([
+        {"finish_reason": "tool_calls", "message": {
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "gap_to", "arguments": '{"target": "leader"}'}}]}},
+        {"finish_reason": "stop", "message": {
+            "content": "Rossi's five point nine up the road."}},
+    ])
+    answer = client.generate("How far am I behind the leader?", _leader_snapshot())
+    assert answer == "Rossi's five point nine up the road."

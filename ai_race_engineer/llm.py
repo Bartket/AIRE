@@ -416,6 +416,15 @@ If the requested tyre type is not in that list, use ambiguous."""
         that keeps calling tools is stalling rather than working.
         """
         convo: List[Dict[str, Any]] = list(messages)
+        # What the last calculator said, for a model that falls silent once it
+        # has its result. Claude Haiku 4.5 does exactly that: it answers in the
+        # same turn as the tool call, then returns nothing after the result,
+        # having already said it — and only the last turn was ever spoken, so
+        # "how far am I behind the leader?" went 5 for 5 as "I lost that one,
+        # say again". The calculator's sentence is the safe recovery. The
+        # model's earlier text was written before the tool ran, so any figure
+        # in it is one nothing has checked.
+        computed = ""
 
         for _ in range(_MAX_TOOL_ROUNDS):
             try:
@@ -436,7 +445,7 @@ If the requested tyre type is not in that list, use ambiguous."""
 
             calls = message.get("tool_calls") or []
             if not calls:
-                return message.get("content", "") or ""
+                return (message.get("content") or "").strip() or computed
 
             # The assistant turn must be replayed verbatim or the follow-up
             # request has tool results with nothing to attach them to.
@@ -455,6 +464,7 @@ If the requested tyre type is not in that list, use ambiguous."""
                 logger.info("tool %s(%s) -> %s", name, args, result.get("spoken"))
                 if len(calls) == 1 and name in _TERMINAL_TOOLS:
                     return result.get("spoken", "")
+                computed = result.get("spoken", "") or computed
                 convo.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", ""),
@@ -464,7 +474,8 @@ If the requested tyre type is not in that list, use ambiguous."""
 
         # Out of rounds: ask once more with tools withheld so it must speak.
         logger.warning("Tool loop hit its limit; answering without tools")
-        return self._chat(convo, max_tokens=self._reply_budget)
+        return (self._chat(convo, max_tokens=self._reply_budget).strip()
+                or computed)
 
     # ── Request building ────────────────────────────────────────────
 
