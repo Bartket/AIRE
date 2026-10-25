@@ -728,3 +728,47 @@ def test_an_averaged_qualifying_format_is_read_from_the_session():
     reader = _live_quali()
     reader.session_blob["SessionInfo"]["Sessions"][0]["SessionNumLapsToAvg"] = 4
     assert reader._qualifying_format()["laps_to_average"] == 4
+
+
+# ── Tyres: current in the pit box, last-stop figures anywhere else ─────
+
+def _tyres(temp, **extra):
+    values = {f"{c}tempC{p}": temp for c in ("LF", "RF", "LR", "RR")
+              for p in ("L", "M", "R")}
+    values.update(extra)
+    return values
+
+
+def test_tyre_readings_are_current_in_the_box_and_not_assumed_anywhere_else(
+        monkeypatch):
+    """iRacing refreshes tyres for outside apps in the pit box, not on track.
+
+    The old rule treated any change as proof of a live feed — including the
+    refresh in the box — and assumed the first reading was live. Both put the
+    frozen last-stop figures in front of the model as current: for the whole
+    out-lap after every stop, and for 150 s after the app started mid-stint.
+    """
+    from ai_race_engineer.telemetry import irsdk_reader
+
+    clock = [1000.0]
+    monkeypatch.setattr(irsdk_reader.time, "monotonic", lambda: clock[0])
+
+    # Started mid-stint: the figures were set at the last stop.
+    reader = _Reader(_tyres(80.0))
+    assert reader._tyre_fresh() is False
+
+    # In the box they are current, and they change as the crew works.
+    reader.values = _tyres(82.0, PlayerCarInPitStall=True)
+    assert reader._tyre_fresh() is True
+
+    # Pulling out: the box's refresh is not evidence of a live feed on track.
+    reader.values = _tyres(82.0)
+    clock[0] += 5
+    assert reader._tyre_fresh() is False
+
+    # If a feed ever does move on track, that is believed — for a while.
+    reader.values = _tyres(84.0)
+    clock[0] += 5
+    assert reader._tyre_fresh() is True
+    clock[0] += 200
+    assert reader._tyre_fresh() is False

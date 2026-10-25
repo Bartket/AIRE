@@ -445,6 +445,14 @@ class AppConfig:
         with self._lock:
             data = copy.deepcopy(self._data)
             self._dirty = False
+        # A prompt nobody has edited is left out, so loading falls back to the
+        # one that ships. Written out, it froze at whatever shipped the day the
+        # file was first saved: every rule added to the prompt afterwards —
+        # and most of them exist because the engineer got something wrong on
+        # air — never reached an install that already had a config file. An
+        # edited prompt is the driver's own and is always kept.
+        if data.get("system_prompt") == _DEFAULT_CONFIG["system_prompt"]:
+            data.pop("system_prompt")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:

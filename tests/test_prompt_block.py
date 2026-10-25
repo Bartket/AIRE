@@ -248,3 +248,59 @@ def test_a_detected_topic_still_gates_the_strategy_lines_with_tools_off():
     # Both keep the whole block, because nothing can fetch back what is cut.
     assert "- Ahead: Rossi" in tyres
     assert "- Ahead: Rossi" in fuel
+
+
+def test_tyre_figures_are_withheld_on_track_rather_than_caveated():
+    """Handed over with a STALE caveat, frozen figures were still read out.
+
+    Out on track the readings are what was set at the last stop, so there is
+    nothing true to say about the tyres from them. The block says so in one
+    line and gives the model nothing to recite.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    car = _car(tyre_data_live=False, tire_fl_wear=90.0, tire_fr_wear=86.0,
+               tire_fl_temp=90.0, tire_fr_temp=95.0, stint_laps=12)
+    turn = PromptBuilder(AppConfig()).build_user_turn(
+        "How are my tyres?", TelemetrySnapshot(car, TrackConfig(session_type="Race")),
+        tools_enabled=True)
+
+    assert "NO LIVE READING" in turn
+    for figure in ("86", "95 C", "Tyre tread", "carcass temps"):
+        assert figure not in turn, figure
+    # The stint is still there, because it is measured live.
+    assert "Stint: 12 laps" in turn
+
+
+def test_a_current_tyre_reading_comes_with_its_spread_worked_out():
+    """Twelve numbers meant reciting them or comparing them in the model's head."""
+    from ai_race_engineer.prompt_builder import _tyre_summary
+
+    car = _car(tire_fl_wear=90.0, tire_fr_wear=86.0, tire_rl_wear=92.0,
+               tire_rr_wear=91.0, tire_fl_temp=90.0, tire_fr_temp=95.0,
+               tire_rl_temp=85.0, tire_rr_temp=87.0)
+    summary = _tyre_summary(car)
+    assert "tread 86% to 92%, least on the front right" in summary
+    assert "highest on the front right" in summary
+    # Never the words the caveat forbids, not even relative ones.
+    for word in ("hot", "cold", "cool", "warm"):
+        assert word not in summary.lower(), word
+
+    even = _car(tire_fl_wear=90.0, tire_fr_wear=90.0, tire_rl_wear=90.0,
+                tire_rr_wear=90.0)
+    assert "tread even at 90%" in _tyre_summary(even)
+
+
+def test_tyre_age_is_not_offered_as_a_fact():
+    """It was the stint lap count copied to four corners — wrong after any
+    stop that did not change tyres."""
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    for live in (True, False):
+        turn = PromptBuilder(AppConfig()).build_user_turn(
+            "How are my tyres?",
+            TelemetrySnapshot(_car(tyre_data_live=live, tire_fl_age=3),
+                              TrackConfig(session_type="Race")))
+        assert "Tyre age" not in turn

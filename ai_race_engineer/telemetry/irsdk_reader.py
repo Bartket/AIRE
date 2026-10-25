@@ -1364,26 +1364,43 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 drop(water, self._water_level_start))
 
     def _tyre_fresh(self) -> bool:
-        """Whether the tyre readings have moved recently.
+        """Whether the tyre readings describe the tyres as they are now.
 
-        Frozen values are not a failure to report — they are last-stop data,
-        which is useful if labelled and misleading if not.
+        iRacing refreshes tyre wear and temperature for outside apps when the
+        car stops in its pit box, and not out on track — its own build notes
+        say so, and a live race showed 38 C unchanged from start to flag. So
+        in the box they are current, and anywhere else they are what was set
+        at the last stop unless they are actually seen to move.
+
+        This used to treat any change as proof of a live feed, including the
+        refresh in the box itself, and to assume the first reading was live.
+        Both labelled the frozen last-stop figures as current: for the whole
+        out-lap after every stop, and for the first 150 s after the app
+        started mid-stint.
         """
         sig = tuple(
             round(float(self._get(f"{c}tempC{p}") or -1), 2)
             for c in ("LF", "RF", "LR", "RR") for p in ("L", "M", "R")
         )
         now = time.monotonic()
-        if self._tyre_signature is None:
+        if self._get("PlayerCarInPitStall", False):
+            # Current here — and the refresh is not evidence of anything on
+            # track, so the out-lap starts from "not seen to move".
             self._tyre_signature = sig
-            self._tyre_changed_at = now
+            self._tyre_changed_at = 0.0
             return True
+        if self._tyre_signature is None:
+            # First sight away from the box: whatever is there was set at the
+            # last stop.
+            self._tyre_signature = sig
+            self._tyre_changed_at = 0.0
+            return False
         if sig != self._tyre_signature:
             self._tyre_signature = sig
             self._tyre_changed_at = now
         # A green lap is well under two minutes; unchanged for longer than
         # that on track means the feed is not updating.
-        return (now - self._tyre_changed_at) < 150.0
+        return self._tyre_changed_at > 0.0 and (now - self._tyre_changed_at) < 150.0
 
     def _tyre_state(self, corner: str) -> Optional[TyreState]:
         """The three tread strips, mapped from the SDK's frame to the car's.

@@ -62,3 +62,17 @@ def test_a_saved_config_is_moved_off_a_retired_model():
     # A model nobody retired is left exactly as the driver set it.
     kept = AppConfig({"elevenlabs": {"tts_model": "eleven_multilingual_v2"}})
     assert kept.elevenlabs["tts_model"] == "eleven_multilingual_v2"
+
+
+def test_an_unedited_prompt_tracks_the_shipped_one(tmp_path):
+    """Written out, it froze at whatever shipped the day it was first saved."""
+    from ai_race_engineer.config import AppConfig
+
+    path = tmp_path / "config.json"
+    AppConfig({}, path=path).save()
+    assert "system_prompt" not in json.loads(path.read_text(encoding="utf-8"))
+    assert AppConfig.load(str(path)).system_prompt == _DEFAULT_CONFIG["system_prompt"]
+
+    # The driver's own prompt is theirs, and is always kept.
+    AppConfig({"system_prompt": "Be brief."}, path=path).save()
+    assert json.loads(path.read_text(encoding="utf-8"))["system_prompt"] == "Be brief."

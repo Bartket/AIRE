@@ -8,6 +8,22 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- Asked about tyres on track, the engineer read out a dozen figures that were
+  frozen at the last pit stop. iRacing only refreshes tyre wear and
+  temperature for outside apps in the pit box, and AIRE treated the refresh
+  in the box as proof of a live feed, so the out-lap after every stop — and
+  the first two and a half minutes after starting the app — presented
+  last-stop figures as current. Tyre readings now count as current in the
+  box, or if they are actually seen to move on track. Otherwise the engineer
+  is given nothing to recite and says it can't see the tyres out there. In
+  the box it gets the spread worked out — lowest tread, highest carcass —
+  rather than twelve numbers.
+- "Tyre age" is no longer stated. It was the stint lap count copied to all
+  four corners, so after a stop that did not change tyres it was wrong.
+- An unedited system prompt is no longer written into the config file. It
+  froze at whatever shipped the day the file was first saved, so later fixes
+  to the prompt never reached an existing install. An edited prompt is kept.
+
 - Asking for "status" got a recital of the whole session. The question names
   no topic, so the model was handed everything and read most of it out —
   measured at 41 to 71 words on a cheap model, with a closing trend it had

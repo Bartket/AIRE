@@ -260,26 +260,9 @@ class PromptBuilder:
                 _position_line(car, track)
                 + f" | Speed: {_speed(car, car.speed)}"
                 + f" | Gear: {car.gear or 'unknown'} | RPM: {car.rpm}",
-                f"- Tyre tread remaining (%): FL {_num(car.tire_fl_wear, 0)}"
-                f" | FR {_num(car.tire_fr_wear, 0)} | RL {_num(car.tire_rl_wear, 0)}"
-                f" | RR {_num(car.tire_rr_wear, 0)}",
-                # These are CARCASS temperatures — the only ones the SDK
-                # publishes. They run far cooler than the surface temps the
-                # in-game tyre box shows, so a bare number invited the model
-                # to call 38C cold when that is normal for a carcass.
-                # Carcass, not surface — the only temperature the SDK
-                # publishes, and much cooler than the tyre box shows. The
-                # normal range depends on car and compound and is not
-                # published anywhere, so the honest position is that we
-                # cannot say hot or cold at all. Saying "do not judge these
-                # without a reference" was not enough: it still called 38C
-                # cool. Forbid the words instead.
-                f"- Tyre carcass temps: FL {_temp(car, car.tire_fl_temp)}"
-                f" | FR {_temp(car, car.tire_fr_temp)} | RL {_temp(car, car.tire_rl_temp)}"
-                f" | RR {_temp(car, car.tire_rr_temp)}",
-                _tyre_caveat(car),
-                f"- Tyre age (laps): FL {car.tire_fl_age} | FR {car.tire_fr_age}"
-                f" | RL {car.tire_rl_age} | RR {car.tire_rr_age}",
+            ]
+            + _tyre_lines(car)
+            + [
                 _brakes(car),
                 _fuel_line(car),
                 f"- {_neighbour_label(track, 'Ahead', car.ahead)}: {_rival(car.ahead, car)}",
@@ -719,25 +702,85 @@ def _fuel_line(car) -> str:
     return " | ".join(bits)
 
 
-def _tyre_caveat(car) -> str:
-    """Say what the tyre numbers actually are before the model reads them.
+def _tyre_lines(car) -> list:
+    """Tyre readings while they are current, one plain line while they are not.
 
-    Two separate traps. They are carcass temperatures, not the surface temps
-    the in-car tyre box shows, and much cooler — a bare 38 got called "cold"
-    on air. And iRacing restricts live tyre telemetry to in-car dashboards,
-    so for a third-party reader they can stop updating once the car leaves
-    the pits, leaving last-stop values that look current.
+    iRacing refreshes tyre wear and temperature for outside apps only in the
+    pit box, so out on track — nearly all the time — the figures are what was
+    set at the last stop. They used to be handed over anyway with a STALE
+    caveat, and asked about tyres the engineer read them out: twelve numbers
+    and an apology, when the honest answer is that there is no reading out
+    there. Withheld, there is nothing to recite.
+
+    "Tyre age" is gone from both cases. It was the stint lap count copied to
+    all four corners, which is wrong after any stop that did not change tyres;
+    the stint line already says what it really measured.
     """
     if not getattr(car, "tyre_data_live", True):
-        return ("  (STALE: these tyre readings have stopped updating. iRacing only"
-                " refreshes tyre telemetry for outside apps in the pits, so these are"
-                " the values from the last stop, not now. Say so if asked about tyres,"
-                " and do not describe them as current.)")
-    return ("  (CARCASS temperatures, the only ones the sim publishes, and far cooler"
-            " than the surface temps in the in-car tyre box. What counts as normal"
-            " depends on car and compound and is not published, so you CANNOT tell"
-            " whether these are hot or cold — never call them cold, cool, warm, hot or"
-            " up to temperature. Report the numbers and the spread, nothing more.)")
+        return ["- Tyres: NO LIVE READING on track. Wear and temperature only"
+                " update in the pit box, so the last figures are from the last"
+                " stop and say nothing about now. Asked about tyres, say in a few"
+                " words that you can't see them out there — never read old"
+                " figures out as current."]
+
+    lines = [
+        f"- Tyre tread remaining (%): FL {_num(car.tire_fl_wear, 0)}"
+        f" | FR {_num(car.tire_fr_wear, 0)} | RL {_num(car.tire_rl_wear, 0)}"
+        f" | RR {_num(car.tire_rr_wear, 0)}",
+        # Carcass, not surface — the only temperature the SDK publishes, and
+        # much cooler than the tyre box shows. The normal range depends on
+        # car and compound and is not published anywhere, so the honest
+        # position is that we cannot say hot or cold at all. Saying "do not
+        # judge these without a reference" was not enough: it still called
+        # 38C cool. Forbid the words instead.
+        f"- Tyre carcass temps: FL {_temp(car, car.tire_fl_temp)}"
+        f" | FR {_temp(car, car.tire_fr_temp)} | RL {_temp(car, car.tire_rl_temp)}"
+        f" | RR {_temp(car, car.tire_rr_temp)}",
+    ]
+    summary = _tyre_summary(car)
+    if summary:
+        lines.append(summary)
+    lines.append(
+        "  (CARCASS temperatures, the only ones the sim publishes, and far cooler"
+        " than the surface temps in the in-car tyre box. What counts as normal"
+        " depends on car and compound and is not published, so you CANNOT tell"
+        " whether these are hot or cold — never call them cold, cool, warm, hot or"
+        " up to temperature. Answer from the summary line; read out a single"
+        " corner only when asked about that corner.)")
+    return lines
+
+
+def _tyre_summary(car) -> str:
+    """The spread across the four corners, worked out here rather than aloud.
+
+    Answering "how are my tyres" from twelve numbers meant either reciting
+    them or comparing them in the model's head, and the model must not do
+    the arithmetic. Neutral words only — "lowest" and "highest", never
+    "hottest" — because a relative word is one step from the absolute one
+    the caveat forbids.
+    """
+    corners = (("front left", car.tire_fl_wear, car.tire_fl_temp),
+               ("front right", car.tire_fr_wear, car.tire_fr_temp),
+               ("rear left", car.tire_rl_wear, car.tire_rl_temp),
+               ("rear right", car.tire_rr_wear, car.tire_rr_temp))
+    bits = []
+    tread = [(wear, name) for name, wear, _ in corners if wear is not None]
+    if tread:
+        low, high = min(tread), max(tread)
+        if round(low[0]) == round(high[0]):
+            bits.append(f"tread even at {low[0]:.0f}%")
+        else:
+            bits.append(f"tread {low[0]:.0f}% to {high[0]:.0f}%,"
+                        f" least on the {low[1]}")
+    temps = [(temp, name) for name, _, temp in corners if temp is not None]
+    if temps:
+        low, high = min(temps), max(temps)
+        if round(low[0]) == round(high[0]):
+            bits.append(f"carcass even at {_temp(car, low[0])}")
+        else:
+            bits.append(f"carcass {_temp(car, low[0])} to {_temp(car, high[0])},"
+                        f" highest on the {high[1]}")
+    return ("- Tyre summary: " + " | ".join(bits)) if bits else ""
 
 
 def _fixed_setup(track) -> list:
