@@ -539,11 +539,15 @@ If the requested tyre type is not in that list, use ambiguous."""
         except ValueError as exc:
             raise LLMError(f"Malformed JSON from {url}: {exc}") from exc
 
+        # Before the error check below, not after: a call that reached the
+        # provider may have been billed whatever its body says, and the point
+        # of these counters is what the question cost. Undercounting is the
+        # wrong direction to be wrong in.
+        self._record_usage(result.get("usage"))
+
         # OpenRouter surfaces upstream provider failures in a 200 body.
         if isinstance(result.get("error"), dict):
             raise LLMError(result["error"].get("message", "unknown provider error"))
-
-        self._record_usage(result.get("usage"))
 
         choices = result.get("choices") or []
         if not choices:

@@ -74,6 +74,7 @@ class _Timings:
         self._started = time.perf_counter()
         self._stages: Dict[str, float] = {}
         self._first_audio: Optional[float] = None
+        self._reading: Optional[Dict[str, Any]] = None
 
     @contextmanager
     def stage(self, name: str):
@@ -95,11 +96,26 @@ class _Timings:
             self._first_audio = (time.perf_counter() - self._started) * 1000.0
 
     def as_dict(self) -> Dict[str, Any]:
-        timings: Dict[str, Any] = dict(self._stages)
-        if self._first_audio is not None:
-            timings["first_audio"] = round(self._first_audio, 1)
-        timings["total"] = round((time.perf_counter() - self._started) * 1000.0, 1)
-        return timings
+        """The reading, taken once and then frozen.
+
+        A turn asks for this more than once — the panel wants it, the trace
+        wants it, and on a voice turn the outer handler asks again after the
+        inner one has finished. Re-reading the clock each time gave the same
+        exchange two different totals: measured with a full minute of samples
+        in the record, the later read was 6.5 ms against the trace's 1.5 ms,
+        because between them sat the cost of serialising and writing the trace
+        itself. That is diagnostics overhead, not something the driver waited
+        for. One turn is one measurement.
+        """
+        if self._reading is None:
+            timings: Dict[str, Any] = dict(self._stages)
+            if self._first_audio is not None:
+                timings["first_audio"] = round(self._first_audio, 1)
+            timings["total"] = round(
+                (time.perf_counter() - self._started) * 1000.0, 1)
+            self._reading = timings
+        # A copy, so a caller holding the panel's dict cannot edit the trace's.
+        return dict(self._reading)
 
 
 def _irsdk_available() -> bool:

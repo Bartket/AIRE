@@ -115,3 +115,39 @@ def test_cache_counters_are_read_back_rather_than_assumed():
     assert "cached" not in client.last_usage
     client._record_usage(None)
     assert client.last_usage["prompt"] == 100
+
+
+def test_a_billed_call_is_counted_even_when_its_body_carries_an_error():
+    """OpenRouter reports upstream provider failures inside a 200 body.
+
+    The call still reached the provider and may still have been billed, so
+    counting it only on the success path understates what a question cost —
+    and understating is the wrong direction to be wrong in when the whole
+    point of these counters is deciding what to optimise.
+    """
+    import pytest
+
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient, LLMError
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "error": {"message": "upstream is down"},
+                "usage": {"prompt_tokens": 2300, "completion_tokens": 0},
+            }
+
+    config = AppConfig({"llm": {"openrouter": {"api_key": "test-key"}}})
+    client = LLMClient(config)
+    client._client.post = lambda *_a, **_k: _Response()
+    client.reset_usage()
+
+    with pytest.raises(LLMError, match="upstream is down"):
+        client._chat_raw([{"role": "user", "content": "Hi"}])
+
+    assert client.last_usage["prompt"] == 2300
+    assert client.last_usage["calls"] == 1

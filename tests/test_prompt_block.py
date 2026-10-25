@@ -216,3 +216,35 @@ def test_a_compacted_block_is_only_used_when_a_tool_can_fetch_the_rest():
     with_tools = builder.build_user_turn(question, snapshot, tools_enabled=True)
     assert "- Ahead: Rossi" not in with_tools
     assert len(with_tools) < len(without_tools)
+
+
+def test_a_detected_topic_still_gates_the_strategy_lines_with_tools_off():
+    """Compacting the block and gating the strategy lines are separate calls.
+
+    The strategy summary is folded in only for a question that is about
+    strategy, or one with no single topic at all — two lines of fuel and pit
+    window on a tyre question are tokens nobody asked for. Tying that gate to
+    whether the block was compacted silently turned it off for every
+    tools-off question, because the block is no longer compacted there.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import Rival, TelemetrySnapshot
+
+    car = _car(position=4, fuel_capacity=60.0, fuel_burn_samples=5,
+               fuel_burn_min=3.4, fuel_burn_max=3.6,
+               ahead=Rival(name="Rossi", car_number="13", position=3, gap=1.2))
+    track = TrackConfig(session_type="Race", laps_remaining=12,
+                        field=[Rival(name="Rossi", position=3)])
+    snapshot = TelemetrySnapshot(car, track)
+    builder = PromptBuilder(AppConfig())
+
+    tyres = builder.build_user_turn("How are my tyres?", snapshot,
+                                    tools_enabled=False)
+    fuel = builder.build_user_turn("How's my fuel?", snapshot,
+                                   tools_enabled=False)
+
+    assert "- Fuel plan:" not in tyres
+    assert "- Fuel plan:" in fuel
+    # Both keep the whole block, because nothing can fetch back what is cut.
+    assert "- Ahead: Rossi" in tyres
+    assert "- Ahead: Rossi" in fuel

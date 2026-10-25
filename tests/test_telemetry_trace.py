@@ -1,6 +1,7 @@
 """The optional live trace must help debugging without becoming a log leak."""
 
 import json
+import time
 
 from ai_race_engineer.config import AppConfig
 from ai_race_engineer.orchestrator import Orchestrator
@@ -124,9 +125,50 @@ def test_the_trace_carries_what_the_driver_waited_for(tmp_path, monkeypatch):
     assert orch.status()["last_timings"]["total"] == timings["total"]
 
 
-def test_a_measurement_is_never_worth_the_answer(tmp_path):
-    """`_speak` off the pipeline must still work with no turn in flight."""
+def test_a_measurement_is_never_worth_the_answer(tmp_path, monkeypatch):
+    """`_speak` must still run with no turn in flight, and still report why.
+
+    The first version of this asserted `_flush_trace() is None`, which is true
+    whatever the code does — a test that could not fail, reporting safety it
+    was not providing. This one calls the thing the name is about.
+    """
+    import asyncio
+
+    from ai_race_engineer.tts import TTSError
+
     orch = _orchestrator(tmp_path, True)
     orch._timings = None
-    # No exception, and nothing recorded: the fallback stopwatch is discarded.
-    assert orch._flush_trace() is None
+    monkeypatch.setattr(
+        orch.tts, "synthesize",
+        lambda *_a, **_k: (_ for _ in ()).throw(TTSError("no key")))
+
+    async def directly(function, *args):
+        return function(*args)
+    monkeypatch.setattr(asyncio, "to_thread", directly)
+
+    # The fallback stopwatch keeps the stage wrapper working; the real failure
+    # still gets through to the status bar rather than being masked by it.
+    assert asyncio.run(orch._speak("Anything.")) is False
+    assert "no key" in (orch._last_error or "")
+
+
+def test_one_turn_is_one_measurement(tmp_path):
+    """The panel and the trace must not disagree about the same exchange.
+
+    `as_dict` is asked for twice in a turn, and on a voice turn a third time
+    after the trace has been written. Re-reading the clock each time made the
+    later readings include the cost of writing the trace — 6.5 ms against the
+    trace's own 1.5 ms, on a record holding a full minute of samples.
+    """
+    from ai_race_engineer.orchestrator import _Timings
+
+    timings = _Timings()
+    with timings.stage("llm"):
+        pass
+    first = timings.as_dict()
+    time.sleep(0.02)
+    assert timings.as_dict() == first
+
+    # And the copy handed out cannot edit the one the next caller gets.
+    first["total"] = 999.0
+    assert timings.as_dict()["total"] != 999.0

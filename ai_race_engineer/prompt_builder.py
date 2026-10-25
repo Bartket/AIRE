@@ -135,20 +135,25 @@ class PromptBuilder:
             return f"No telemetry is available right now.\n\nQuestion: {question}"
         block = self.format_telemetry(telemetry.car, telemetry.track,
                                       self._callsign())
-        # Only compact the block when the model can fetch back what was cut.
+        # Which single topic this question is about, or None. Kept separate
+        # from whether the block is actually compacted, because the two want
+        # different answers: the strategy lines below are gated on the topic
+        # either way, while compacting is only safe when a calculator can
+        # fetch back what was cut.
+        topic = self._focus_prefixes(question)
         # The pace group drops the rival lines and the running order, which is
         # right when a calculator is a tool call away and wrong when it is not:
         # with tools off, "am I faster than the car ahead?" arrived with no car
         # ahead in it. The tokens saved were never worth a question that cannot
         # be answered from what it was given.
-        focus = self._focus_prefixes(question) if tools_enabled else None
+        focus = topic if tools_enabled else None
         if focus is not None:
             block = self._focused_block(block, focus)
         # Without tools the model would have to do the strategy sums itself,
         # so hand it the answers already worked out.
         if not tools_enabled:
             precomputed = (race_math.summary_lines(telemetry)
-                           if focus is None or any(word in question.lower()
+                           if topic is None or any(word in question.lower()
                                                    for word in ("fuel", "pit", "strategy"))
                            else [])
             if precomputed:
