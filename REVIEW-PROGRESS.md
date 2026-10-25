@@ -149,6 +149,37 @@ should be green between items.
 
 ---
 
+## Review pass over the Now phase (25 Oct 2026)
+
+Re-read of `main..HEAD` looking for defects rather than features. Five found,
+all in the Now-phase work itself, all fixed with a put-back check:
+
+- **One turn produced more than one measurement.** `_Timings.as_dict` re-read
+  the clock per call, and a turn asks twice (panel, trace) plus a third time on
+  a voice turn. Between them sat the trace write: 6.5 ms reported against the
+  trace's own 1.5 ms. The reading is taken once and frozen, handed out as a copy.
+- **Item 4 silently disabled a token gate.** Tying the focus filter to
+  `tools_enabled` also switched off the gate on the pre-computed strategy lines,
+  because that gate tested the same variable — so every tools-off question got
+  the fuel plan folded in, tyre questions included. `topic` and `focus` are now
+  separate values.
+- **Token counters were recorded after the 200-with-error check**, so a call
+  that reached the provider and may have been billed went uncounted.
+- **A test that could not fail** — `assert _flush_trace() is None` — replaced
+  with one that calls what its name is about.
+- **A renamed clause key would have vanished from the radio in silence.** Both
+  directions of `_FUEL_RADIO_ORDER` are now pinned.
+
+Also corrected two comments claiming the panel displays the stage timings. It
+does not; `last_timings` is served on `/api/status` and nothing in the UI reads
+it. Wiring it to the panel would be a new feature and was not done.
+
+**Method note:** a put-back that restores a file of identical size can leave
+stale bytecode, which then fails a test for the wrong reason and sent this pass
+chasing a non-existent isolation bug. Clear `__pycache__` after one.
+
+---
+
 ## Notes for whoever picks this up
 
 - Nothing here has run in a live iRacing session. Items 5 and 6 exist to produce
