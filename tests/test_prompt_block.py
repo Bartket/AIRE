@@ -281,8 +281,10 @@ def test_a_current_tyre_reading_comes_with_its_spread_worked_out():
                tire_rr_wear=91.0, tire_fl_temp=90.0, tire_fr_temp=95.0,
                tire_rl_temp=85.0, tire_rr_temp=87.0)
     summary = _tyre_summary(car)
-    assert "tread 86% to 92%, least on the front right" in summary
-    assert "highest on the front right" in summary
+    assert "tread 86% on the front right to 92% on the rear left" in summary
+    # Both ends name their corner. Given only the highest corner, the model
+    # named the lowest itself, live, and picked the wrong one.
+    assert "85 C on the rear left to 95 C on the front right" in summary
     # Never the words the caveat forbids, not even relative ones.
     for word in ("hot", "cold", "cool", "warm"):
         assert word not in summary.lower(), word

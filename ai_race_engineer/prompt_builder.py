@@ -755,9 +755,11 @@ def _tyre_summary(car) -> str:
 
     Answering "how are my tyres" from twelve numbers meant either reciting
     them or comparing them in the model's head, and the model must not do
-    the arithmetic. Neutral words only — "lowest" and "highest", never
-    "hottest" — because a relative word is one step from the absolute one
-    the caveat forbids.
+    the arithmetic. Both ends name their corner: given the highest corner
+    and only the lowest figure, the model supplied the lowest corner itself
+    and got it wrong, live. No hot or cold words here at all, relative ones
+    included — the caveat forbids the absolute ones, and these are a step
+    from them.
     """
     corners = (("front left", car.tire_fl_wear, car.tire_fl_temp),
                ("front right", car.tire_fr_wear, car.tire_fr_temp),
@@ -770,16 +772,16 @@ def _tyre_summary(car) -> str:
         if round(low[0]) == round(high[0]):
             bits.append(f"tread even at {low[0]:.0f}%")
         else:
-            bits.append(f"tread {low[0]:.0f}% to {high[0]:.0f}%,"
-                        f" least on the {low[1]}")
+            bits.append(f"tread {low[0]:.0f}% on the {low[1]} to"
+                        f" {high[0]:.0f}% on the {high[1]}")
     temps = [(temp, name) for name, _, temp in corners if temp is not None]
     if temps:
         low, high = min(temps), max(temps)
         if round(low[0]) == round(high[0]):
             bits.append(f"carcass even at {_temp(car, low[0])}")
         else:
-            bits.append(f"carcass {_temp(car, low[0])} to {_temp(car, high[0])},"
-                        f" highest on the {high[1]}")
+            bits.append(f"carcass {_temp(car, low[0])} on the {low[1]} to"
+                        f" {_temp(car, high[0])} on the {high[1]}")
     return ("- Tyre summary: " + " | ".join(bits)) if bits else ""
 
 
