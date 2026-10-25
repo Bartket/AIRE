@@ -46,7 +46,7 @@ logger = logging.getLogger("race-engineer")
 # functions it describes.
 SPOKEN_VERBATIM = frozenset({
     "fuel_plan", "pit_window", "position_report", "adjacent_gap_trend",
-    "car_resources", "race_control_report",
+    "car_resources", "race_control_report", "status_report",
 })
 
 # The radio budget for anything in SPOKEN_VERBATIM while a session is running.
@@ -1031,7 +1031,7 @@ def gap_to(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]
     """Gap between you and any car in the field, by name, number or position."""
     if not track.field:
         return _no("I haven't got the order in front of me.")
-    them = _find(track.field, target)
+    them = _resolve_target(car, track, target)
     if them is None:
         return _no(f"I can't find {target} out there.")
     me = _me(track)
@@ -1157,6 +1157,49 @@ def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
             "driver": _radio_rival_name(car.behind), "gap_seconds": car.behind.gap}),
         basis="live position plus physical adjacent-car gaps; not gap to leader",
     )
+
+
+def status_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """The quick check: where you are, and only what needs acting on.
+
+    "Status" names no topic, so handed to the model it was answered with
+    everything the block holds. Measured on a cheap model: 41 to 71 words,
+    every figure in the session read out in a row — and a closing trend that
+    had never been measured, stated as fact. An engineer answers it with the
+    place and the gaps, and adds something only when the driver has to do
+    something about it. Detail is one more question away.
+
+    Flags are compared against "Green", which is the reader's own word for
+    nothing set, so no flag value is assumed here.
+    """
+    base = position_report(car, track)
+    if not base["available"]:
+        return base
+
+    clauses: Dict[str, str] = {}
+    flag = (car.flag or "").strip()
+    if car.penalty or (flag and flag != "Green"
+                       and not getattr(track, "finished", False)):
+        control = race_control_report(car, track)
+        if control["available"]:
+            clauses["race_control"] = control["spoken"]
+
+    fuel = fuel_plan(car, track)
+    if fuel.get("strategy_available"):
+        # fuel_plan's own verdict, not a second reading of its margins: its
+        # marginal branch is the one that leaves will_finish unset, and that
+        # covers the extra-timed-lap case as well as a burn range spanning
+        # the flag. Raised, not explained — the figures are a question away,
+        # and a status call that recites them is what this exists to stop.
+        if fuel.get("will_finish") is False:
+            clauses["fuel"] = "Fuel won't reach the flag."
+        elif fuel.get("will_finish") is None:
+            clauses["fuel"] = "Fuel's marginal."
+
+    return _yes(_radio(base["spoken"], clauses, ("race_control", "fuel")),
+                headline=base["spoken"], clauses=clauses,
+                position=base.get("position"),
+                class_position=base.get("class_position"))
 
 
 def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
@@ -1366,7 +1409,7 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
     """
     if not track.field:
         return _no("I haven't got the order in front of me.")
-    them = _find(track.field, target)
+    them = _resolve_target(car, track, target)
     if them is None:
         return _no(f"I can't find {target} out there.")
     if not them.best_lap:
@@ -1447,15 +1490,7 @@ def driver_report(car: CarTelemetry, track: TrackConfig,
     if not track.field:
         return _no("I've got no timing data on the other cars.")
 
-    query = str(target or "").strip().lower()
-    them: Optional[Rival] = None
-    if query in ("ahead", "in front", "the car ahead", "the car in front",
-                 "the guy ahead", "the guy in front", "next", "car ahead"):
-        them = _classified(track, car.ahead) or _neighbour(track, -1)
-    elif query in ("behind", "the car behind", "the guy behind", "car behind"):
-        them = _classified(track, car.behind) or _neighbour(track, +1)
-    else:
-        them = _find(track.field, query)
+    them = _resolve_target(car, track, target)
     if them is None:
         return _no("I can't find that car in the timing screen.")
 
@@ -1559,13 +1594,7 @@ def sector_report(car: CarTelemetry, track: TrackConfig,
         return _no("I haven't timed a full lap through the sectors yet.")
 
     if target:
-        them = _find(track.field, str(target).strip().lower()) if track.field else None
-        if str(target).strip().lower() in ("ahead", "in front", "the car ahead",
-                                           "the car in front", "the guy ahead"):
-            them = _classified(track, car.ahead) or _neighbour(track, -1)
-        elif str(target).strip().lower() in ("behind", "the car behind",
-                                             "the guy behind"):
-            them = _classified(track, car.behind) or _neighbour(track, +1)
+        them = _resolve_target(car, track, target)
         if them is None:
             return _no("I can't find that car in the timing screen.")
         theirs = them.sector_times or []
@@ -1659,6 +1688,32 @@ def _neighbour(track: TrackConfig, offset: int) -> Optional[Rival]:
     if me is None:
         return None
     return next((r for r in track.field if r.position == me.position + offset), None)
+
+
+# What the driver — or a model passing on the driver's words — means by the
+# car beside them. One list, because there were two that had drifted apart:
+# driver_report understood "next" and "the guy in front" and sector_report did
+# not, while gap_to and pace_compare had no copy at all — so the most natural
+# argument for "what's the gap ahead?" came back as "I can't find ahead out
+# there", spoken to the driver as though it were an answer.
+_AHEAD_WORDS = frozenset({
+    "ahead", "in front", "next", "car ahead", "the car ahead", "car in front",
+    "the car in front", "the guy ahead", "the guy in front",
+})
+_BEHIND_WORDS = frozenset({
+    "behind", "car behind", "the car behind", "the guy behind",
+})
+
+
+def _resolve_target(car: CarTelemetry, track: TrackConfig,
+                    target: Any) -> Optional[Rival]:
+    """The car a target names: a physical neighbour, or a lookup in the order."""
+    query = str(target or "").strip().lower()
+    if query in _AHEAD_WORDS:
+        return _classified(track, car.ahead) or _neighbour(track, -1)
+    if query in _BEHIND_WORDS:
+        return _classified(track, car.behind) or _neighbour(track, +1)
+    return _find(track.field, query) if track.field else None
 
 
 def pace_trend(car: CarTelemetry, track: TrackConfig,
@@ -1965,7 +2020,7 @@ _TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Driver name, car number (\"#44\"), position (\"P3\"), or \"leader\".",
+                    "description": "Driver name, car number (\"#44\"), position (\"P3\"), \"leader\", \"ahead\" or \"behind\".",
                 }
             },
             "required": ["target"],
@@ -2033,7 +2088,7 @@ _TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Driver name, car number, position, or \"leader\".",
+                    "description": "Driver name, car number, position, \"leader\", \"ahead\" or \"behind\".",
                 }
             },
             "required": ["target"],

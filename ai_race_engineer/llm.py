@@ -87,6 +87,20 @@ def _direct_telemetry_answer(
         return race_math.position_report(
             telemetry.car, telemetry.track).get("spoken")
 
+    # A request for "status" names no topic, and given the whole block the
+    # model answered it with the whole block — 41 to 71 words on a cheap
+    # model, with a closing trend it had not been given stated as fact.
+    # After the flag it is left to the model, because the debrief is where
+    # the engineer is meant to talk.
+    status_phrases = {
+        "status", "status update", "update", "give me an update",
+        "give me a status", "give me a status update", "quick update",
+        "sitrep", "how are we looking", "hows it looking", "how is it looking",
+    }
+    if normalised in status_phrases and not getattr(telemetry.track, "finished", False):
+        return race_math.status_report(
+            telemetry.car, telemetry.track).get("spoken")
+
     fuel_phrases = {
         "fuel", "fuel status", "hows my fuel", "how is my fuel",
         "do i have enough fuel", "have i got enough fuel",
@@ -502,9 +516,15 @@ If the requested tyre type is not in that list, use ambiguous."""
         url = f"{settings['endpoint'].rstrip('/')}/chat/completions"
         limit = max_tokens or settings["max_tokens"]
         if tools:
-            # The spoken answer stays one sentence, but the turn that emits a
-            # tool call needs room for the call itself. Squeezing it into the
-            # 80-token speech budget truncates the JSON.
+            # The turn that emits a tool call needs room for the call itself;
+            # squeezing it into the 80-token speech budget truncates the JSON.
+            # The price is that a model which answers directly on this turn,
+            # without calling anything, does so under this ceiling and not the
+            # speech budget — so with tools on, the speech budget does not
+            # bound a direct answer at all. Only the prompt does, which is why
+            # the length of those answers depends on the model. Lowering this
+            # would not fix that: an answer cut at the token limit stops
+            # mid-word rather than getting shorter.
             limit = max(limit, _TOOL_CALL_TOKENS)
         if self._thinks_aloud:
             # This model has already shown it reasons before speaking, and

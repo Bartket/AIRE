@@ -3028,3 +3028,104 @@ def test_every_fuel_clause_is_either_on_the_radio_or_deliberately_not():
     # Spoken only when the model is doing the talking: the stop count already
     # carries the decision, and the burn rate was not what was asked.
     assert reachable - set(rm._FUEL_RADIO_ORDER) == {"burn", "verdict"}
+
+
+# ── "Status": the place, the gaps, and only what needs acting on ─────
+
+def _status_race(**car_kw):
+    # Neighbours match _field(), where the driver is P4 between Becker and
+    # Novak; and the tank covers the 18 laps left unless a test says otherwise.
+    base = dict(position=4, flag="Green", fuel_level=80.0,
+                ahead=Rival(name="Becker", car_number="19", position=3, gap=1.5),
+                behind=Rival(name="Novak", car_number="34", position=5, gap=1.8))
+    base.update(car_kw)
+    return (_car(**base),
+            TrackConfig(session_type="Race", laps_remaining=18, field=_field()))
+
+
+def test_status_is_the_place_and_the_gaps_and_nothing_else_when_all_is_well():
+    """Asked "status", a cheap model read out every figure in the session.
+
+    41 to 71 words, measured — and one of those answers had the car behind
+    "closing" when no trend had been measured at all.
+    """
+    car, track = _status_race()
+    spoken = rm.status_report(car, track)["spoken"]
+    assert spoken == rm.position_report(car, track)["spoken"]
+    assert "fuel" not in spoken.lower()
+    assert "flag" not in spoken.lower()
+
+
+def test_status_raises_race_control_and_fuel_but_does_not_explain_them():
+    car, track = _status_race(flag="Yellow", fuel_level=12.0, fuel_capacity=60.0,
+                              fuel_per_lap=3.4, fuel_burn_samples=6,
+                              fuel_burn_min=3.2, fuel_burn_max=3.7,
+                              avg_lap_time=92.0)
+    spoken = rm.status_report(car, track)["spoken"]
+    assert "Yellow" in spoken
+    assert "Fuel won't reach the flag." in spoken
+    # The figures are one question away; reciting them is the bug.
+    assert "litres" not in spoken
+    assert len(spoken.split()) <= rm.SPOKEN_BUDGET_WORDS
+
+
+def test_status_calls_a_marginal_tank_marginal_rather_than_safe():
+    car, track = _status_race(fuel_level=47.0, fuel_capacity=60.0,
+                              fuel_per_lap=3.3, fuel_burn_samples=6,
+                              fuel_burn_min=2.5, fuel_burn_max=2.9,
+                              avg_lap_time=92.0)
+    track = TrackConfig(session_type="Race", laps_remaining=17, field=_field())
+    assert rm.fuel_plan(car, track)["will_finish"] is None, "fixture must be marginal"
+    assert "Fuel's marginal." in rm.status_report(car, track)["spoken"]
+
+
+def test_status_routes_without_a_model_and_only_on_an_exact_ask():
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient, _direct_telemetry_answer
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    car, track = _status_race()
+    snapshot = TelemetrySnapshot(car, track)
+    for ask in ("Status?", "status update", "How are we looking?", "Sitrep"):
+        assert _direct_telemetry_answer(ask, snapshot) == \
+            rm.status_report(car, track)["spoken"], ask
+
+    # A topic named alongside "update" is a question about that topic.
+    assert _direct_telemetry_answer("give me an update on fuel", snapshot) != \
+        rm.status_report(car, track)["spoken"]
+
+    client = LLMClient(AppConfig())
+    client._chat_raw = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("status reached the model"))
+    assert client.generate("status", snapshot) == rm.status_report(car, track)["spoken"]
+
+
+def test_status_after_the_flag_is_left_to_the_debrief():
+    """The slow-down lap is where the engineer is meant to talk."""
+    from ai_race_engineer.llm import _direct_telemetry_answer
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    car, track = _status_race()
+    track.finished = True
+    assert _direct_telemetry_answer("status", TelemetrySnapshot(car, track)) is None
+
+
+# ── "Ahead" and "behind" mean the same car to every calculator ───────
+
+def test_every_rival_calculator_understands_ahead_and_behind():
+    """gap_to and pace_compare answered "I can't find ahead out there".
+
+    That is the most natural argument for "what's the gap ahead?", and a
+    model passing it got a refusal it then spoke to the driver. The words
+    used to be listed separately in driver_report and sector_report, and
+    the two lists had drifted apart.
+    """
+    car, track = _status_race(sector_times=[30.1, 31.2, 30.0],
+                              best_lap_time=91.2)
+    for word in ("ahead", "the car in front", "next", "behind", "car behind"):
+        for name in ("gap_to", "pace_compare", "driver_report"):
+            spoken = getattr(rm, name)(car, track, word)["spoken"]
+            assert "can't find" not in spoken, f"{name}({word!r}): {spoken}"
+
+    assert "Becker" in rm.gap_to(car, track, "ahead")["spoken"]
+    assert "Novak" in rm.gap_to(car, track, "behind")["spoken"]

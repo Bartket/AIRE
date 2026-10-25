@@ -6,6 +6,20 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+### Fixed
+
+- Asking for "status" got a recital of the whole session. The question names
+  no topic, so the model was handed everything and read most of it out —
+  measured at 41 to 71 words on a cheap model, with a closing trend it had
+  never been given stated as fact. "Status", "update", "sitrep" and "how are
+  we looking" now get the place and the gaps in a dozen words, plus one short
+  line only when something needs acting on: a flag, a penalty, or fuel that
+  will not reach the end. After the flag they are left to the debrief.
+- "What's the gap ahead?" could be answered "I can't find ahead out there."
+  Two calculators did not understand "ahead" or "behind" — the most natural
+  thing a model passes them — and the two that did kept separate lists that
+  had drifted apart. All four now share one.
+
 ### Changed
 
 - Moved to ElevenLabs' current speech models. Both the ones AIRE shipped with
