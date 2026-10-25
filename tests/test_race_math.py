@@ -2983,3 +2983,48 @@ def test_the_verbatim_set_matches_what_llm_actually_speaks():
 
     assert _TERMINAL_TOOLS <= rm.SPOKEN_VERBATIM
     assert "race_control_report" in rm.SPOKEN_VERBATIM
+
+
+def test_every_fuel_clause_is_either_on_the_radio_or_deliberately_not():
+    """A renamed clause key must not vanish from the radio in silence.
+
+    `_radio` looks clauses up by name, so a key renamed in `fuel_plan` without
+    the order tuple following it would simply stop being spoken — no error, no
+    missing field, just a quieter answer. Both halves are pinned here: every
+    name the order tuple asks for has to be reachable, and every clause
+    `fuel_plan` can produce has to be either on the radio or knowingly left
+    off it.
+    """
+    short = dict(fuel_level=12.0, fuel_capacity=60.0, fuel_per_lap=3.4,
+                 fuel_burn_samples=6, fuel_burn_min=3.2, fuel_burn_max=3.7,
+                 avg_lap_time=92.0, lap_progress=0.4)
+    lap_limited = TrackConfig(session_type="Race", laps_remaining=14,
+                              current_lap=20, laps_total=34)
+    timed = TrackConfig(session_type="Race", laps_remaining=None,
+                        time_remaining=1300.0, current_lap=20)
+
+    reachable = set()
+    for car, track, kwargs in (
+        (CarTelemetry(**short), lap_limited, {}),
+        (CarTelemetry(**short, laps_to_go_is_estimate=True), timed, {}),
+        (CarTelemetry(**short, fuel_last_lap=5.0,
+                      fuel_last_lap_clean=True), lap_limited, {}),
+        (CarTelemetry(**short, fuel_last_lap=1.5,
+                      fuel_last_lap_clean=True), lap_limited, {}),
+        (CarTelemetry(**short), timed, {"target_minutes": 20}),
+        (CarTelemetry(fuel_level=55.0, fuel_capacity=60.0, fuel_per_lap=3.2,
+                      fuel_burn_samples=6, fuel_burn_min=3.1, fuel_burn_max=3.3,
+                      avg_lap_time=92.0, laps_to_go_is_estimate=True), timed, {}),
+        # Shortfall bigger than the tank: no saving target, stops instead.
+        (CarTelemetry(fuel_level=5.0, fuel_capacity=6.0, fuel_per_lap=3.4,
+                      fuel_burn_samples=6, fuel_burn_min=3.2,
+                      fuel_burn_max=3.7, avg_lap_time=92.0), lap_limited, {}),
+    ):
+        reachable |= set((rm.fuel_plan(car, track, **kwargs)
+                          .get("clauses") or {}).keys())
+
+    assert not set(rm._FUEL_RADIO_ORDER) - reachable, \
+        "the radio asks for a clause fuel_plan never produces"
+    # Spoken only when the model is doing the talking: the stop count already
+    # carries the decision, and the burn rate was not what was asked.
+    assert reachable - set(rm._FUEL_RADIO_ORDER) == {"burn", "verdict"}

@@ -155,7 +155,8 @@ class Orchestrator:
         self._hotkey_error: Optional[str] = None
         self._snapshot: Optional[TelemetrySnapshot] = None
         self._snapshot_at: float = 0.0
-        # Stage timings for the exchange in flight, kept after it for the panel.
+        # Stage timings for the exchange in flight, kept after it so the
+        # last reading survives for `status()`.
         self._timings: Optional[_Timings] = None
         self._last_timings: Optional[Dict[str, Any]] = None
         self._pending_trace: Optional[Dict[str, Any]] = None
@@ -385,8 +386,9 @@ class Orchestrator:
             "pit_commands_enabled": (
                 self.config.get("pit_commands", {}).get("enabled") is True),
             "pit_command_pending": self._pending_pit_command is not None,
-            # Stage milliseconds for the last completed exchange. The panel
-            # shows what the driver waited for and where it went.
+            # Stage milliseconds for the last completed exchange. Served on
+            # /api/status for diagnostics; nothing in the panel renders it
+            # yet, so this is read with a request, not watched on screen.
             "last_timings": self._last_timings,
         }
 
