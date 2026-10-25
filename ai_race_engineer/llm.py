@@ -577,7 +577,8 @@ If the requested tyre type is not in that list, use ambiguous."""
         # `length`, it produced reasoning, and it produced no speech. That is
         # recoverable and worth one retry with room — but only once, so a
         # model that is simply silent cannot loop here.
-        if _thought_past_the_budget(choices[0]) and not self._thinks_aloud:
+        if (_thought_past_the_budget(choices[0], result.get("usage"))
+                and not self._thinks_aloud):
             logger.info("%s reasons before answering; retrying with %d tokens",
                         settings["model"], _THINKING_TOKENS)
             self._thinks_aloud = True
@@ -612,7 +613,8 @@ If the requested tyre type is not in that list, use ambiguous."""
         self._client.close()
 
 
-def _thought_past_the_budget(choice: Dict[str, Any]) -> bool:
+def _thought_past_the_budget(choice: Dict[str, Any],
+                             usage: Optional[Dict[str, Any]] = None) -> bool:
     """Whether the model spent its whole budget reasoning and never spoke.
 
     Three things together, because any one alone means something else: it
@@ -622,14 +624,24 @@ def _thought_past_the_budget(choice: Dict[str, Any]) -> bool:
     without reasoning is a different fault.
 
     Providers name the reasoning channel differently, hence the three keys.
+    And some do not return the reasoning at all: Claude Haiku 5.5 through
+    OpenRouter thinks with its text withheld, so the only evidence is the
+    count in `completion_tokens_details.reasoning_tokens`. Reading the text
+    alone, this missed it — a forced final answer at the 80-token speech
+    budget came back empty, the retry with room never fired, and the driver
+    heard "I lost that one, say again".
     """
     message = choice.get("message") or {}
     if choice.get("finish_reason") != "length":
         return False
     if (message.get("content") or "").strip() or message.get("tool_calls"):
         return False
-    return any((message.get(key) or "").strip()
-               for key in ("reasoning", "reasoning_content", "thinking"))
+    if any((message.get(key) or "").strip()
+           for key in ("reasoning", "reasoning_content", "thinking")):
+        return True
+    details = (usage or {}).get("completion_tokens_details")
+    hidden = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return isinstance(hidden, int) and not isinstance(hidden, bool) and hidden > 0
 
 
 def _error_detail(response: httpx.Response) -> str:

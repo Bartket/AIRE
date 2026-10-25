@@ -151,3 +151,60 @@ def test_a_billed_call_is_counted_even_when_its_body_carries_an_error():
 
     assert client.last_usage["prompt"] == 2300
     assert client.last_usage["calls"] == 1
+
+
+def test_hidden_reasoning_still_earns_the_retry_with_room():
+    """Some models think with the reasoning text withheld.
+
+    Claude Haiku 5.5 through OpenRouter returns no reasoning text, only a
+    count. The retry was keyed on the text, so a forced final answer that
+    spent its whole 80-token budget thinking came back empty and the driver
+    heard "I lost that one, say again" — measured once in eighteen live runs.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+
+    budgets = []
+
+    class _Response:
+        def __init__(self, body):
+            self._body = body
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._body
+
+    def post(_url, json=None, **_kw):
+        budgets.append(json["max_tokens"])
+        if len(budgets) == 1:
+            # The whole budget went on thinking nobody can see.
+            return _Response({
+                "choices": [{"finish_reason": "length",
+                             "message": {"content": ""}}],
+                "usage": {"completion_tokens": 80,
+                          "completion_tokens_details": {"reasoning_tokens": 80}},
+            })
+        return _Response({"choices": [{"finish_reason": "stop", "message": {
+            "content": "You're five point nine behind the leader."}}]})
+
+    client = LLMClient(AppConfig({"llm": {"openrouter": {"api_key": "x"}}}))
+    client._client.post = post
+
+    reply = client._chat([{"role": "user", "content": "gap to the leader?"}],
+                         max_tokens=80)
+
+    assert reply == "You're five point nine behind the leader."
+    assert budgets[0] == 80 and budgets[1] > 80
+
+    # A model that says nothing and reports no reasoning is still a different
+    # fault, and still not retried — the existing rule is unchanged.
+    budgets.clear()
+    silent = LLMClient(AppConfig({"llm": {"openrouter": {"api_key": "x"}}}))
+    silent._client.post = lambda _u, json=None, **_k: (budgets.append(json["max_tokens"]), _Response({
+        "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+        "usage": {"completion_tokens": 80,
+                  "completion_tokens_details": {"reasoning_tokens": 0}}}))[1]
+    assert silent._chat([{"role": "user", "content": "?"}], max_tokens=80) == ""
+    assert budgets == [80]

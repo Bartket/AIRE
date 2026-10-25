@@ -8,6 +8,13 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- A model that thinks without showing its reasoning could answer with
+  nothing. AIRE retries with more room when a model spends its whole budget
+  thinking, but recognised that only from the reasoning text — and Claude
+  Haiku 5.5 through OpenRouter withholds the text and reports a count. A
+  final answer at the one-sentence budget came back empty and the driver
+  heard "I lost that one, say again". The count now counts.
+
 - Asked about tyres on track, the engineer read out a dozen figures that were
   frozen at the last pit stop. iRacing only refreshes tyre wear and
   temperature for outside apps in the pit box, and AIRE treated the refresh
