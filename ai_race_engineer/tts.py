@@ -46,7 +46,7 @@ class TTS:
     def __init__(
         self,
         api_key: str,
-        model: str = "eleven_turbo_v2_5",
+        model: str = "eleven_flash_v2_5",
         voice_id: str = "",
         voice_name: str = "",
         voice_settings: Optional[Dict[str, Any]] = None,

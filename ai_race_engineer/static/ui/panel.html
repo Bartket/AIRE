@@ -335,20 +335,18 @@
                 <div class="form-group">
                     <label>STT Model:</label>
                     <select v-model="config.elevenlabs.stt_model">
-                    <p class="hint">Speech recognition — what turns your question into text.</p>
-                        <option value="scribe_v1">Scribe v1</option>
-                        <option value="scribe_v1_experimental">Scribe v1 (experimental)</option>
                         <option value="scribe_v2">Scribe v2</option>
                     </select>
+                    <p class="hint">Speech recognition — what turns your question into text. Scribe v2 biases toward the surnames in your session, which is what makes a name land.</p>
                 </div>
                 <div class="form-group">
                     <label>TTS Model:</label>
                     <select v-model="config.elevenlabs.tts_model">
-                    <p class="hint">The engineer's voice. Turbo is the cheapest per character and the fastest, which matters when you are waiting mid-corner.</p>
-                        <option value="eleven_turbo_v2_5">Turbo v2.5 (lowest latency)</option>
-                        <option value="eleven_multilingual_v2">Multilingual v2</option>
-                        <option value="eleven_flash_v2_5">Flash v2.5</option>
+                        <option value="eleven_flash_v2_5">Flash v2.5 (lowest latency)</option>
+                        <option value="eleven_multilingual_v2">Multilingual v2 (twice the price)</option>
+                        <option value="eleven_v3">Eleven v3 (twice the price)</option>
                     </select>
+                    <p class="hint">The engineer's voice. Flash is the fastest and the cheapest per character, which is what matters while you are waiting mid-corner. The other two cost twice as much per character and are slower on this path; Multilingual reads numbers slightly better.</p>
                 </div>
             </section>
 

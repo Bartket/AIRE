@@ -711,7 +711,8 @@ which you ask 30–60.
 
 AIRE itself has no subscription. You supply your own API keys and pay the
 providers directly. Measured against `anthropic/claude-haiku-4.5` and
-ElevenLabs Turbo:
+ElevenLabs Turbo v2.5, which has since been replaced by Flash v2.5 — the two
+sit in the same price tier, so the figures below still hold:
 
 | Component | Per question |
 | --- | --- |

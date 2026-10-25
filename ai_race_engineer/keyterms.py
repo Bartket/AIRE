@@ -9,10 +9,16 @@ the car in the running order.
 Everything here comes from the live session, so the vocabulary follows
 whoever is actually on track.
 
-Cost note: ElevenLabs bills a 20% surcharge and a 20-second minimum billable
-duration once a request carries more than 100 keyterms. Radio clips run two
-to five seconds, so crossing that line would multiply the bill several times
-over for a marginal accuracy gain. MAX_KEYTERMS stays under it deliberately.
+Cost note: the two penalties start in different places, which the previous
+version of this note ran together. The 20% surcharge applies whenever a
+request carries keyterms at all, so it is already being paid on every
+question. The 20-second minimum billable duration only applies above 100
+keyterms — and radio clips run two to five seconds, so crossing that line
+would multiply the bill several times over for a marginal accuracy gain.
+MAX_KEYTERMS stays under it deliberately.
+
+Scribe v2 raised the ceiling to 1,000 terms, which changes nothing here: the
+100-term threshold is what the limit is set by, not the ceiling.
 """
 
 from __future__ import annotations

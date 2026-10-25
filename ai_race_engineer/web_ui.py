@@ -495,7 +495,7 @@ def _tts(config: AppConfig) -> TTS:
     el = config.elevenlabs
     return TTS(
         config.elevenlabs_key(),
-        model=el.get("tts_model", "eleven_turbo_v2_5"),
+        model=el.get("tts_model", "eleven_flash_v2_5"),
         voice_id=el.get("tts_voice_id", ""),
         voice_name=el.get("tts_voice_name", ""),
         language=config.get("language", "en"),

@@ -26,11 +26,24 @@ APP_NAME = "AIRE"
 PROVIDER_OPENROUTER = "openrouter"
 PROVIDER_LOCAL = "local"
 
+# Models ElevenLabs has retired, mapped to what replaced them. Kept as a
+# table rather than inline so `_migrate` and the no-retired-models test read
+# from the same place: a list that only one of them knows about is a list
+# that stops being true.
+_RETIRED_STT = {
+    "scribe_v1": "scribe_v2",
+    "scribe_v1_experimental": "scribe_v2",
+}
+_RETIRED_TTS = {
+    "eleven_turbo_v2_5": "eleven_flash_v2_5",
+    "eleven_turbo_v2": "eleven_flash_v2",
+}
+
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "elevenlabs": {
         "api_key": "",
-        "stt_model": "scribe_v1",
-        "tts_model": "eleven_turbo_v2_5",
+        "stt_model": "scribe_v2",
+        "tts_model": "eleven_flash_v2_5",
         "tts_voice_id": "",
         "tts_voice_name": "",
         # Passed through to the ElevenLabs voice_settings block.
@@ -314,6 +327,18 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
             existing = next((k for k in legacy_keys if k), "")
             if existing:
                 el["api_key"] = existing
+
+        # ElevenLabs retired both models this app shipped with. A saved
+        # config pins whatever it was written with, so leaving these alone
+        # keeps an install on a model that will eventually stop answering —
+        # and a model that stops answering mid-race is a silent failure, not
+        # a visible one. The replacements are documented as equivalent: same
+        # price tier, lower latency for Flash, same price and better accuracy
+        # for Scribe v2.
+        for key, retired in (("stt_model", _RETIRED_STT),
+                             ("tts_model", _RETIRED_TTS)):
+            if el.get(key) in retired:
+                el[key] = retired[el[key]]
 
     return data
 

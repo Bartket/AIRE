@@ -67,7 +67,7 @@ def should_repeat(result: Transcription) -> bool:
 class STT:
     """ElevenLabs Scribe speech-to-text."""
 
-    def __init__(self, api_key: str, model: str = "scribe_v1", language: str = "en"):
+    def __init__(self, api_key: str, model: str = "scribe_v2", language: str = "en"):
         self._api_key = api_key
         self._model = model
         self._language = language

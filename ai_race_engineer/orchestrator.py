@@ -185,12 +185,12 @@ class Orchestrator:
         )
         self.stt = STT(
             config.elevenlabs_key(),
-            model=el.get("stt_model", "scribe_v1"),
+            model=el.get("stt_model", "scribe_v2"),
             language=config.get("language", "en"),
         )
         self.tts = TTS(
             config.elevenlabs_key(),
-            model=el.get("tts_model", "eleven_turbo_v2_5"),
+            model=el.get("tts_model", "eleven_flash_v2_5"),
             voice_id=el.get("tts_voice_id", ""),
             voice_name=el.get("tts_voice_name", ""),
             language=config.get("language", "en"),
@@ -1014,12 +1014,12 @@ class Orchestrator:
 
         self.stt = STT(
             cfg.elevenlabs_key(),
-            model=el.get("stt_model", "scribe_v1"),
+            model=el.get("stt_model", "scribe_v2"),
             language=cfg.get("language", "en"),
         )
         self.tts = TTS(
             cfg.elevenlabs_key(),
-            model=el.get("tts_model", "eleven_turbo_v2_5"),
+            model=el.get("tts_model", "eleven_flash_v2_5"),
             voice_id=el.get("tts_voice_id", ""),
             voice_name=el.get("tts_voice_name", ""),
             language=cfg.get("language", "en"),

@@ -1,8 +1,8 @@
 {
   "elevenlabs": {
     "api_key": "",
-    "stt_model": "scribe_v1",
-    "tts_model": "eleven_turbo_v2_5",
+    "stt_model": "scribe_v2",
+    "tts_model": "eleven_flash_v2_5",
     "tts_voice_id": "",
     "tts_voice_name": "",
     "cache_speech": true,

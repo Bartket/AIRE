@@ -6,6 +6,21 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+### Changed
+
+- Moved to ElevenLabs' current speech models. Both the ones AIRE shipped with
+  have been retired: `scribe_v1` is replaced by `scribe_v2`, and
+  `eleven_turbo_v2_5` by `eleven_flash_v2_5`. Neither costs more — Flash and
+  Turbo are billed in the same tier, and Scribe v2 is the same price per hour
+  as v1 — and both replacements are faster or more accurate. A retired model
+  answers until it does not, and a model that stops answering mid-race is a
+  silent failure, so a saved config naming one is moved across on load rather
+  than left on it.
+- The model dropdowns now list only models that still exist, and say which
+  cost twice as much per character. Eleven v3 is selectable for anyone who
+  wants it; it is not the default because it is dearer and, on the single-shot
+  path AIRE uses, slower than Flash.
+
 ### Fixed
 
 - Asking about fuel or tyres could be answered with a pit-command refusal,
