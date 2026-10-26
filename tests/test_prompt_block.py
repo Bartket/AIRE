@@ -306,3 +306,28 @@ def test_tyre_age_is_not_offered_as_a_fact():
             TelemetrySnapshot(_car(tyre_data_live=live, tire_fl_age=3),
                               TrackConfig(session_type="Race")))
         assert "Tyre age" not in turn
+
+
+def test_the_model_is_handed_a_verdict_on_the_car_not_a_dozen_readings():
+    """Asked "how's the car", the model read out normal temperatures.
+
+    A normal reading is not news. The verdict comes from the same list as
+    the "status" answer, so the two cannot disagree about whether the car is
+    fine, and it survives the compaction of a car-focused question.
+    """
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    builder = PromptBuilder(AppConfig())
+    track = TrackConfig(session_type="Race", laps_remaining=10)
+
+    fine = builder.build_user_turn(
+        "How's the engine?", TelemetrySnapshot(_car(water_temp=90.0), track),
+        tools_enabled=True)
+    assert "Car check: ALL CLEAR" in fine
+
+    hurt = builder.build_user_turn(
+        "How's the engine?",
+        TelemetrySnapshot(_car(warnings=["oil pressure warning"]), track),
+        tools_enabled=True)
+    assert "Car check: NEEDS ATTENTION — Oil pressure warning." in hurt

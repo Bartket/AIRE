@@ -3056,15 +3056,22 @@ def test_status_is_the_place_and_the_gaps_and_nothing_else_when_all_is_well():
     assert "flag" not in spoken.lower()
 
 
-def test_status_raises_race_control_and_fuel_but_does_not_explain_them():
-    car, track = _status_race(flag="Yellow", fuel_level=12.0, fuel_capacity=60.0,
+def test_status_raises_what_needs_acting_on_and_not_what_the_driver_can_see():
+    """Race control and fuel are raised; a yellow on the dash is not news.
+
+    The penalty channel is what compels the driver, and they may not have
+    seen it. A flag they can see on their own dash adds words, not
+    information. Neither is explained: the figures are a question away.
+    """
+    car, track = _status_race(flag="Yellow", penalty="stop-and-go penalty",
+                              fuel_level=12.0, fuel_capacity=60.0,
                               fuel_per_lap=3.4, fuel_burn_samples=6,
                               fuel_burn_min=3.2, fuel_burn_max=3.7,
                               avg_lap_time=92.0)
     spoken = rm.status_report(car, track)["spoken"]
-    assert "Yellow" in spoken
+    assert "Stop-and-go penalty." in spoken
     assert "Fuel won't reach the flag." in spoken
-    # The figures are one question away; reciting them is the bug.
+    assert "Yellow" not in spoken
     assert "litres" not in spoken
     assert len(spoken.split()) <= rm.SPOKEN_BUDGET_WORDS
 
@@ -3079,25 +3086,55 @@ def test_status_calls_a_marginal_tank_marginal_rather_than_safe():
     assert "Fuel's marginal." in rm.status_report(car, track)["spoken"]
 
 
-def test_status_routes_without_a_model_and_only_on_an_exact_ask():
+def test_status_is_the_car_and_how_are_we_looking_is_the_race():
+    """"Status" asks whether anything is wrong; usually nothing is.
+
+    Answered with the place, the gaps and the engine figures, it was the
+    engineer talking for the sake of it. The driver wants "car looks fine",
+    and the race situation when they ask how the race is going.
+    """
     from ai_race_engineer.config import AppConfig
     from ai_race_engineer.llm import LLMClient, _direct_telemetry_answer
     from ai_race_engineer.telemetry import TelemetrySnapshot
 
     car, track = _status_race()
     snapshot = TelemetrySnapshot(car, track)
-    for ask in ("Status?", "status update", "How are we looking?", "Sitrep"):
+    for ask in ("Status?", "status update", "How's the car?", "Any issues?"):
+        assert _direct_telemetry_answer(ask, snapshot) == "Car looks fine.", ask
+    for ask in ("How are we looking?", "Sitrep", "give me an update",
+                "How's it going?"):
         assert _direct_telemetry_answer(ask, snapshot) == \
-            rm.status_report(car, track)["spoken"], ask
+            rm.position_report(car, track)["spoken"], ask
 
     # A topic named alongside "update" is a question about that topic.
-    assert _direct_telemetry_answer("give me an update on fuel", snapshot) != \
-        rm.status_report(car, track)["spoken"]
+    assert _direct_telemetry_answer("give me an update on fuel", snapshot) is None
 
     client = LLMClient(AppConfig())
     client._chat_raw = lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("status reached the model"))
-    assert client.generate("status", snapshot) == rm.status_report(car, track)["spoken"]
+    assert client.generate("status", snapshot) == "Car looks fine."
+
+
+def test_a_car_check_names_only_what_is_wrong_most_urgent_first():
+    car, _ = _status_race(
+        penalty="meatball — must pit for repairs",
+        warnings=["oil pressure warning", "mandatory repairs needed"],
+        oil_level_drop=0.4, repair_required=14.0,
+        water_temp=112.0, oil_temp=130.0)
+    track = TrackConfig(session_type="Race", laps_remaining=18, field=_field())
+    result = rm.car_check(car, track)
+    spoken = result["spoken"]
+
+    assert spoken.startswith("Meatball"), "race control comes first"
+    assert "Oil pressure warning." in spoken
+    assert "losing oil" in spoken
+    assert "14 seconds" in spoken
+    # The repair light says less than the damage line; said once, not twice.
+    assert "mandatory repairs needed" not in spoken.lower()
+    # Engine figures are detail. Raised on request, not volunteered.
+    assert "112" not in spoken and "130" not in spoken
+    assert result["all_clear"] is False
+    assert len(spoken.split()) <= rm.SPOKEN_BUDGET_WORDS
 
 
 def test_status_after_the_flag_is_left_to_the_debrief():

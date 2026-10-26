@@ -14,9 +14,17 @@ def normalise_question(text) -> str:
 
     Speech recognition supplies the punctuation, not the driver, so it
     carries no intent: "Say again?" and "say again" are one question.
+
+    Apostrophes are removed rather than turned into spaces, so a contraction
+    stays one word. Split, "How's my fuel?" became "how s my fuel" while every
+    phrase table spells it "hows my fuel" — so the most-asked question on the
+    radio never reached its deterministic answer whenever the recogniser kept
+    the apostrophe, and it does. Both the straight and the curly one, because
+    recognisers emit either.
     """
+    joined = str(text or "").lower().replace("'", "").replace("’", "")
     return " ".join(
-        "".join(ch if ch.isalnum() else " " for ch in str(text or "").lower()).split())
+        "".join(ch if ch.isalnum() else " " for ch in joined).split())
 
 
 def question_words(text) -> set:

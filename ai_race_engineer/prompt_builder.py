@@ -179,7 +179,7 @@ class PromptBuilder:
                              "- Track conditions:")
         if words & {"damage", "repair", "engine", "oil", "water", "brake",
                     "brakes", "warning", "health"}:
-            return common + ("- Damage:", "- Car/pit state:", "- WARNING LIGHTS:",
+            return common + ("- Car check:", "- Damage:", "- Car/pit state:", "- WARNING LIGHTS:",
                              "- Car location:", "- Pit box:", "- Fluid loss:",
                              "- Engine:", "- Brake")
         if words & {"lap", "laps", "pace", "sector", "sectors", "delta",
@@ -576,7 +576,7 @@ def _driver(track, callsign: str = "") -> str:
     team = getattr(track, "team_name", "") or ""
     if team and team != name:
         bits.append(f"for {team}")
-    return ", ".join(bits) + " — use their name."
+    return ", ".join(bits) + " — use their name now and then, not in every call."
 
 
 def _car_identity(track) -> str:
@@ -927,9 +927,26 @@ def _repairs(car, track) -> list:
                    f" still running. {weigh} Damage on its own is NOT a reason to pit."]
 
 
+def _car_check(car, track) -> str:
+    """The verdict on the car, so the model is handed a conclusion.
+
+    The car's condition is spread over a dozen readings below, and asked
+    "how's the car" the model read them out — normal water and oil
+    temperatures included, which are not news. The same list the "status"
+    answer uses decides here what needs attention, so the two cannot
+    disagree about whether the car is fine.
+    """
+    check = race_math.car_check(car, track)
+    if check.get("all_clear"):
+        return ("- Car check: ALL CLEAR — no penalty, no damage, no warning"
+                " lights, no leaks, fuel fine. Asked about the car, say it looks"
+                " fine and stop; give an engine figure only when asked for it.")
+    return f"- Car check: NEEDS ATTENTION — {check['spoken']}"
+
+
 def _car_state(car, track) -> list:
     """Incidents, damage and engine health — emitted only when present."""
-    lines = _incidents(car) + _repairs(car, track)
+    lines = [_car_check(car, track)] + _incidents(car) + _repairs(car, track)
 
     damage = []
     # Before damage: a stop-and-go and a slow-down need different driving,

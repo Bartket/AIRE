@@ -281,3 +281,30 @@ def test_a_real_final_answer_is_never_replaced_by_the_tool_sentence():
     ])
     answer = client.generate("How far am I behind the leader?", _leader_snapshot())
     assert answer == "Rossi's five point nine up the road."
+
+
+def test_a_sentence_cut_short_by_thinking_is_retried_not_spoken():
+    """Measured live: 484 of 512 tokens thinking, then "…so I'd ease off and watch it".
+
+    The few words that leaked meant "it said nothing" was false, so the
+    retry never fired and a sentence stopped mid-way went out on air. When
+    thinking is most of what the turn spent, the cut answer is the same
+    fault as an empty one. A model that rambles to the limit with little
+    thinking is not, and is still not retried.
+    """
+    from ai_race_engineer.llm import _thought_past_the_budget
+
+    cut = {"finish_reason": "length",
+           "message": {"content": "Oil pressure's on, so I'd ease off and watch it"}}
+    assert _thought_past_the_budget(cut, {
+        "completion_tokens": 512,
+        "completion_tokens_details": {"reasoning_tokens": 484}})
+    assert not _thought_past_the_budget(cut, {
+        "completion_tokens": 512,
+        "completion_tokens_details": {"reasoning_tokens": 40}})
+    assert not _thought_past_the_budget(cut, {"completion_tokens": 512})
+    # A turn that ended on its own is never retried, whatever it thought.
+    assert not _thought_past_the_budget(
+        {"finish_reason": "stop", "message": cut["message"]},
+        {"completion_tokens": 512,
+         "completion_tokens_details": {"reasoning_tokens": 484}})

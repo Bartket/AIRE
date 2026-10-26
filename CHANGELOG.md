@@ -8,6 +8,30 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- "How's my fuel?" — and every other question asked with a contraction —
+  never reached its deterministic answer when speech recognition kept the
+  apostrophe. "How's" became "how s" while every phrase table spells it
+  "hows", so the most-asked question on the radio went to the model instead.
+- An answer could stop mid-sentence on air. A model that thinks before
+  speaking can spend nearly its whole budget thinking and be cut a few words
+  in; only a completely empty answer used to be retried. A sentence cut short
+  by thinking is now retried too.
+
+### Changed
+
+- "Status" is about the car, and when nothing is wrong the answer is "Car
+  looks fine." When something is wrong it names only that, most urgent
+  first: a penalty, being towed, a warning light, a leak, damage, fuel that
+  will not last. Normal readings are not mentioned; ask for one and you get
+  it. "How are we looking", "how's it going" and "sitrep" give the place and
+  the gaps, plus the same short list when something needs acting on. Flags
+  you can see on your own dash are no longer read back.
+- The engineer is told how to answer a broad question: pick what most needs
+  your attention, or say all's well in a few words, and give detail when you
+  ask for it. The 25-word limit is now a ceiling rather than a target, rivals
+  are named but you are not addressed by name in every call, and the model is
+  handed a one-line verdict on the car instead of a dozen readings to sift.
+
 - "How far am I behind the leader?" could be answered "I lost that one, say
   again" — five times in five on Claude Haiku 4.5. The model gave its answer
   in the same turn as calling a calculator, then said nothing after the

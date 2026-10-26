@@ -46,7 +46,7 @@ logger = logging.getLogger("race-engineer")
 # functions it describes.
 SPOKEN_VERBATIM = frozenset({
     "fuel_plan", "pit_window", "position_report", "adjacent_gap_trend",
-    "car_resources", "race_control_report", "status_report",
+    "car_resources", "race_control_report", "status_report", "car_check",
 })
 
 # The radio budget for anything in SPOKEN_VERBATIM while a session is running.
@@ -1159,45 +1159,95 @@ def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     )
 
 
-def status_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
-    """The quick check: where you are, and only what needs acting on.
+def _attention(car: CarTelemetry, track: TrackConfig) -> Dict[str, str]:
+    """What the driver has to know about, most urgent first — and nothing else.
 
-    "Status" names no topic, so handed to the model it was answered with
-    everything the block holds. Measured on a cheap model: 41 to 71 words,
-    every figure in the session read out in a row — and a closing trend that
-    had never been measured, stated as fact. An engineer answers it with the
-    place and the gaps, and adds something only when the driver has to do
-    something about it. Detail is one more question away.
+    A radio call is worth making when it changes what the driver does. A
+    normal reading is not news, so none appears here: no engine figures, no
+    gaps, no flags the driver can see on their own dash. What does appear is
+    what they may not know and have to act on — race control, a car that is
+    being towed, a warning light, a leak, damage, a tank that will not reach
+    the flag. Each is raised, not explained; the detail is one question away.
 
-    Flags are compared against "Green", which is the reader's own word for
-    nothing set, so no flag value is assumed here.
+    Race control is the penalty channel only. It already carries everything
+    that compels the driver — disqualification, stop-and-go, slow-down,
+    meatball, the furled warning — decoded the way CrewChief does it.
     """
-    base = position_report(car, track)
-    if not base["available"]:
-        return base
-
-    clauses: Dict[str, str] = {}
-    flag = (car.flag or "").strip()
-    if car.penalty or (flag and flag != "Green"
-                       and not getattr(track, "finished", False)):
+    attention: Dict[str, str] = {}
+    if car.penalty:
         control = race_control_report(car, track)
         if control["available"]:
-            clauses["race_control"] = control["spoken"]
+            attention["race_control"] = control["spoken"]
+    if car.tow_time:
+        attention["towed"] = "You're being towed."
+
+    damaged = bool(car.repair_required or car.repair_optional)
+    # The reader already drops the limiter lights; the repair lights repeat
+    # what the damage line says, with less in it.
+    lights = [w for w in (car.warnings or [])
+              if not (damaged and "repairs needed" in w)]
+    if lights:
+        text = ", ".join(lights)
+        attention["warnings"] = text[0].upper() + text[1:] + "."
+
+    leaks = [fluid for fluid, drop in (("oil", car.oil_level_drop),
+                                       ("coolant", car.water_level_drop)) if drop]
+    if leaks:
+        attention["leak"] = f"You're losing {' and '.join(leaks)}."
+
+    if car.repair_required:
+        attention["damage"] = (f"You've got damage, {_plural(car.repair_required, 'second')}"
+                               f" to fix if you stop.")
+    elif car.repair_optional:
+        attention["damage"] = "Light damage, nothing that has to be fixed."
 
     fuel = fuel_plan(car, track)
     if fuel.get("strategy_available"):
         # fuel_plan's own verdict, not a second reading of its margins: its
         # marginal branch is the one that leaves will_finish unset, and that
         # covers the extra-timed-lap case as well as a burn range spanning
-        # the flag. Raised, not explained — the figures are a question away,
-        # and a status call that recites them is what this exists to stop.
+        # the flag.
         if fuel.get("will_finish") is False:
-            clauses["fuel"] = "Fuel won't reach the flag."
+            attention["fuel"] = "Fuel won't reach the flag."
         elif fuel.get("will_finish") is None:
-            clauses["fuel"] = "Fuel's marginal."
+            attention["fuel"] = "Fuel's marginal."
+    return attention
 
-    return _yes(_radio(base["spoken"], clauses, ("race_control", "fuel")),
-                headline=base["spoken"], clauses=clauses,
+
+_ATTENTION_ORDER = ("race_control", "towed", "warnings", "leak", "damage", "fuel")
+
+
+def car_check(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """"Status?" — the car, and only what is wrong with it.
+
+    When everything is in order the answer is that it is in order, in four
+    words. Reading out the place, the gaps and the engine figures in reply
+    was the engineer talking for the sake of it; the driver asked whether
+    there is anything to worry about, and usually there is not.
+    """
+    attention = _attention(car, track)
+    if not attention:
+        return _yes("Car looks fine.", clauses={}, all_clear=True)
+    keys = [k for k in _ATTENTION_ORDER if k in attention]
+    return _yes(_radio(attention[keys[0]], attention, tuple(keys[1:])),
+                headline=attention[keys[0]], clauses=attention, all_clear=False)
+
+
+def status_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """"How are we looking?" — the place, the gaps, and anything to act on.
+
+    Handed to the model with the whole block, this was answered with the
+    whole block: 41 to 71 words on a cheap model, and a closing trend that
+    had never been measured stated as fact. The race situation is the place
+    and the cars either side; anything beyond that is said only when it needs
+    acting on, from the same list the car check uses.
+    """
+    base = position_report(car, track)
+    if not base["available"]:
+        return base
+    attention = _attention(car, track)
+    return _yes(_radio(base["spoken"], attention, _ATTENTION_ORDER),
+                headline=base["spoken"], clauses=attention,
                 position=base.get("position"),
                 class_position=base.get("class_position"))
 

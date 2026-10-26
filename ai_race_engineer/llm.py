@@ -87,19 +87,30 @@ def _direct_telemetry_answer(
         return race_math.position_report(
             telemetry.car, telemetry.track).get("spoken")
 
-    # A request for "status" names no topic, and given the whole block the
-    # model answered it with the whole block — 41 to 71 words on a cheap
-    # model, with a closing trend it had not been given stated as fact.
-    # After the flag it is left to the model, because the debrief is where
-    # the engineer is meant to talk.
-    status_phrases = {
-        "status", "status update", "update", "give me an update",
-        "give me a status", "give me a status update", "quick update",
-        "sitrep", "how are we looking", "hows it looking", "how is it looking",
+    # Two questions that name no topic, so given the whole block the model
+    # answered them with the whole block — 41 to 71 words on a cheap model,
+    # with a closing trend it had not been given stated as fact. "Status" is
+    # about the car, and when nothing is wrong the answer is that nothing is
+    # wrong. "How are we looking" is about the race. After the flag both are
+    # left to the model, because the debrief is where the engineer talks.
+    car_phrases = {
+        "status", "status update", "status check", "give me a status",
+        "give me a status update", "car status", "car check", "hows the car",
+        "how is the car", "hows the car looking", "is the car ok",
+        "is the car okay", "car ok", "car okay", "everything ok",
+        "everything okay", "any issues", "any problems", "any damage",
     }
-    if normalised in status_phrases and not getattr(telemetry.track, "finished", False):
-        return race_math.status_report(
-            telemetry.car, telemetry.track).get("spoken")
+    race_phrases = {
+        "update", "give me an update", "quick update", "sitrep",
+        "how are we looking", "hows it looking", "how is it looking",
+        "hows it going", "how is it going",
+    }
+    if not getattr(telemetry.track, "finished", False):
+        if normalised in car_phrases:
+            return race_math.car_check(telemetry.car, telemetry.track).get("spoken")
+        if normalised in race_phrases:
+            return race_math.status_report(
+                telemetry.car, telemetry.track).get("spoken")
 
     fuel_phrases = {
         "fuel", "fuel status", "hows my fuel", "how is my fuel",
@@ -645,14 +656,29 @@ def _thought_past_the_budget(choice: Dict[str, Any],
     message = choice.get("message") or {}
     if choice.get("finish_reason") != "length":
         return False
-    if (message.get("content") or "").strip() or message.get("tool_calls"):
+    if message.get("tool_calls"):
         return False
-    if any((message.get(key) or "").strip()
-           for key in ("reasoning", "reasoning_content", "thinking")):
+    spoke = bool((message.get("content") or "").strip())
+    if not spoke and any((message.get(key) or "").strip()
+                         for key in ("reasoning", "reasoning_content", "thinking")):
         return True
-    details = (usage or {}).get("completion_tokens_details")
+
+    # Withheld reasoning, judged by its count. Here a turn that did leak a
+    # few words still counts when thinking was most of what it spent: Haiku
+    # 5.5, asked about an oil-pressure warning, thought for 484 of its 512
+    # tokens and was cut at "so I'd ease off and watch it" — a sentence
+    # stopped mid-way on air. A model that rambles to the limit with little
+    # thinking is still a different fault and is still not retried, which is
+    # what the rule above was protecting.
+    usage = usage or {}
+    details = usage.get("completion_tokens_details")
     hidden = details.get("reasoning_tokens") if isinstance(details, dict) else None
-    return isinstance(hidden, int) and not isinstance(hidden, bool) and hidden > 0
+    spent = usage.get("completion_tokens")
+    if not isinstance(hidden, int) or isinstance(hidden, bool) or hidden <= 0:
+        return False
+    if not spoke:
+        return True
+    return isinstance(spent, int) and hidden * 2 >= spent
 
 
 def _error_detail(response: httpx.Response) -> str:

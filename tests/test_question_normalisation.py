@@ -13,7 +13,9 @@ from ai_race_engineer.text import normalise_question, question_words
 
 
 def test_punctuation_and_case_come_from_the_recogniser_not_the_driver():
-    assert normalise_question("  What's my POSITION?! ") == "what s my position"
+    # Joined, not split: this used to expect "what s my position", which
+    # pinned the very form no phrase table could match.
+    assert normalise_question("  What's my POSITION?! ") == "whats my position"
     assert normalise_question(None) == ""
     assert question_words("Tyres, and brakes?") == {"tyres", "and", "brakes"}
 
@@ -38,3 +40,20 @@ def test_a_repeat_request_survives_the_recognisers_punctuation():
     assert _is_repeat_request("Say again?")
     assert _is_repeat_request("  REPEAT THAT.  ")
     assert not _is_repeat_request("say again what my fuel is")
+
+
+def test_a_contraction_reaches_the_phrase_it_is_written_as():
+    """Split at the apostrophe, "How's my fuel?" was "how s my fuel".
+
+    Every phrase table spells contractions joined, so the most-asked question
+    on the radio never reached its deterministic answer whenever the speech
+    recogniser kept the apostrophe — which Scribe does. Straight and curly,
+    because recognisers emit either.
+    """
+    from ai_race_engineer.llm import _direct_telemetry_answer
+    from ai_race_engineer.telemetry.simulated import SimulatedTelemetryAdapter
+
+    snapshot = SimulatedTelemetryAdapter().get_telemetry_snapshot()
+    for spoken in ("How's my fuel?", "How\u2019s my fuel?", "What's my position?",
+                   "What's the flag?", "How's the car?", "How's it looking?"):
+        assert _direct_telemetry_answer(spoken, snapshot) is not None, spoken
