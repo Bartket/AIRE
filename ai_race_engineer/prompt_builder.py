@@ -7,7 +7,7 @@ invent a number" rule.
 
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from . import race_math
+from . import car_names, race_math
 from .telemetry import CarTelemetry, TelemetrySnapshot, TrackConfig, session_kind
 from .text import question_words
 
@@ -265,8 +265,8 @@ class PromptBuilder:
             + [
                 _brakes(car),
                 _fuel_line(car),
-                f"- {_neighbour_label(track, 'Ahead', car.ahead)}: {_rival(car.ahead, car)}",
-                f"- {_neighbour_label(track, 'Behind', car.behind)}: {_rival(car.behind, car)}",
+                f"- {_neighbour_label(track, 'Ahead', car.ahead)}: {_rival(car.ahead, car, track)}",
+                f"- {_neighbour_label(track, 'Behind', car.behind)}: {_rival(car.behind, car, track)}",
                 f"- Fastest lap of the session: {_fastest(track.fastest_lap)}",
                 _field_strength(track),
                 f"- Running order ({track.field_size} cars, {_gap_meaning(track)}):"
@@ -343,18 +343,30 @@ def _pressure(car, hpa, decimals=0) -> str:
     return f"{hpa:.{decimals}f} hPa"
 
 
-def _rival(rival, car=None) -> str:
-    """Name the car ahead/behind so the engineer can say who it is."""
+def _multiclass(field) -> bool:
+    class_ids = {getattr(r, "car_class_id", None) for r in field or []
+                 if getattr(r, "car_class_id", None) is not None}
+    return len(class_ids) > 1
+
+
+def _rival(rival, car=None, track=None) -> str:
+    """Name the car ahead/behind so the engineer can say who it is.
+
+    The way an engineer would: "the McLaren", not its full model name, and
+    nothing at all where it tells the driver nothing — the model in a spec
+    series, the class in a single-class race. Only dropped when the field
+    shows it; an empty field is not evidence of either.
+    """
     if rival is None or not rival.known:
         return "no car close"
     who = rival.describe()
+    field = getattr(track, "field", None) or []
     identity = []
-    model = (getattr(rival, "car_model_short", "")
-             or getattr(rival, "car_model", ""))
+    model = "" if car_names.single_make(field) else car_names.spoken_model(rival, field)
     if model:
         identity.append(model)
     car_class = getattr(rival, "car_class_name", "") or ""
-    if car_class:
+    if car_class and (not field or _multiclass(field)):
         identity.append(f"{car_class} class")
     if identity:
         who += f" [{', '.join(identity)}]"
@@ -580,9 +592,12 @@ def _driver(track, callsign: str = "") -> str:
 
 
 def _car_identity(track) -> str:
-    """The sim's own readable car model and class, never a local mapping."""
-    model = (getattr(track, "car_model_short", "")
-             or getattr(track, "car_model", ""))
+    """The driver's car as an engineer would name it, and its class.
+
+    The car is the short radio name where one is known ("McLaren"), else
+    the sim's own; the class is always the sim's.
+    """
+    model = car_names.spoken_model(track, getattr(track, "field", None))
     car_class = getattr(track, "car_class_name", "") or ""
     if not model and not car_class:
         return ""
@@ -1062,9 +1077,7 @@ def _field(field) -> str:
     if not field:
         return UNKNOWN
     parts = []
-    class_ids = {getattr(r, "car_class_id", None) for r in field
-                 if getattr(r, "car_class_id", None) is not None}
-    multiclass = len(class_ids) > 1
+    multiclass = _multiclass(field)
     for r in field[:10]:
         who = r.name or (f"car {r.car_number}" if r.car_number else "?")
         # position is None for somebody in the session who has not been

@@ -28,7 +28,7 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import pronounce
+from . import car_names, pronounce
 from .telemetry import (CarTelemetry, Rival, TelemetrySnapshot, TrackConfig,
                         session_kind)
 
@@ -1552,9 +1552,10 @@ def driver_report(car: CarTelemetry, track: TrackConfig,
             and them.class_position != them.position:
         bits.append(f"P{them.class_position} in class")
 
-    model = them.car_model_short or them.car_model
+    # Named even in a spec series: the driver asked about this car.
+    model = car_names.spoken_model(them, track.field)
     if model:
-        bits.append(f"driving {model}")
+        bits.append(f"driving the {model}")
     if them.car_class_name:
         bits.append(f"in the {them.car_class_name} class")
     context = _class_context(track, them)

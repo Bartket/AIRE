@@ -871,6 +871,82 @@ def test_driver_report_exposes_the_opponents_model_and_class():
     assert "different class" in result["spoken"]
 
 
+def _block_with(ahead, field, **track):
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.prompt_builder import PromptBuilder
+    track = TrackConfig(session_type="Race", field=field,
+                        field_size=len(field), **track)
+    return PromptBuilder(AppConfig()).format_telemetry(_car(ahead=ahead), track)
+
+
+def test_a_rival_is_called_what_an_engineer_calls_it():
+    """Nobody says "the McLaren 720S GT3 EVO is closing". iRacing's own
+    short name is no better — "BMW M4 G82 GT4" — so the nickname comes
+    from a table keyed by CarID."""
+    mclaren = Rival(name="Rossi", car_number="13", car_class_id=1,
+                    car_class_name="GT3", car_id=188, gap=1.2,
+                    car_model="McLaren 720S GT3 EVO",
+                    car_model_short="McLaren 720S GT3")
+    ferrari = Rival(name="You", car_number="44", car_class_id=1,
+                    car_class_name="GT3", car_id=173, is_player=True)
+    block = _block_with(mclaren, [mclaren, ferrari])
+    assert "[McLaren]" in block, block
+    assert "720S" not in block
+
+    result = rm.driver_report(_car(), TrackConfig(
+        session_type="Race", field=[mclaren, ferrari], field_size=2), "Rossi")
+    assert "driving the McLaren" in result["spoken"], result["spoken"]
+
+
+def test_the_drivers_own_car_is_called_what_an_engineer_calls_it():
+    """"You're in the McLaren 720S GT3 EVO" is a spec sheet, not a radio
+    call — the driver's own car gets the same short name as a rival's."""
+    me = Rival(name="You", car_number="44", car_class_id=1,
+               car_class_name="GT3", car_id=188, is_player=True)
+    block = _block_with(None, [me], car_id=188, car_class_name="GT3",
+                        car_model="McLaren 720S GT3 EVO",
+                        car_model_short="McLaren 720S GT3")
+    assert "Your car: McLaren | Class: GT3" in block, block
+
+
+def test_a_nickname_two_models_share_falls_back_to_the_real_name():
+    """A GT3 and a GT4 Mustang in one multiclass race are both "the
+    Mustang"; only iRacing's name tells them apart."""
+    gt3 = Rival(name="Rossi", car_number="13", car_class_id=1,
+                car_class_name="GT3", car_id=185, gap=1.2,
+                car_model_short="Ford Mustang GT3")
+    gt4 = Rival(name="You", car_number="44", car_class_id=2,
+                car_class_name="GT4", car_id=204, is_player=True)
+    block = _block_with(gt3, [gt3, gt4])
+    assert "[Ford Mustang GT3, GT3 class]" in block, block
+
+
+def test_a_spec_series_does_not_name_the_car_or_the_class():
+    """In an MX-5 Cup every car is an MX-5 Cup car. Saying so is characters
+    the driver pays for and learns nothing from."""
+    them = Rival(name="Rossi", car_number="13", car_class_id=1,
+                 car_class_name="MX5 Cup", car_id=67, gap=1.2,
+                 car_model_short="MX-5 Cup")
+    me = Rival(name="You", car_number="44", car_class_id=1,
+               car_class_name="MX5 Cup", car_id=67, is_player=True)
+    block = _block_with(them, [them, me])
+    assert "MX-5" not in block, block
+    assert "MX5 Cup class" not in block
+
+
+def test_a_single_class_race_names_the_car_but_not_the_class():
+    """A GT3 race is one class and many makes: "the Ferrari" is worth
+    saying, "GT3 class" is not."""
+    them = Rival(name="Rossi", car_number="13", car_class_id=1,
+                 car_class_name="GT3", car_id=173, gap=1.2,
+                 car_model_short="Ferrari 296 GT3")
+    me = Rival(name="You", car_number="44", car_class_id=1,
+               car_class_name="GT3", car_id=188, is_player=True)
+    block = _block_with(them, [them, me])
+    assert "[Ferrari]" in block, block
+    assert "GT3 class" not in block
+
+
 def test_different_class_traffic_is_not_called_a_position_rival():
     rival = Rival(name="Prototype", car_number="1", position=3, gap=3.0,
                   best_lap=82.0, car_class_id=20, car_class_name="GTP",
@@ -1840,6 +1916,60 @@ def test_a_substitution_at_a_sentence_start_is_capitalised():
     from ai_race_engineer import pronounce
     out = pronounce.apply("Karlsson is ahead.", {"karlsson": "car 7"})
     assert out.startswith("Car 7")
+
+
+def test_track_entries_match_what_iracing_actually_sends():
+    """Half the original table was written from memory and never fired:
+    "Autodromo Enzo e Dino Ferrari" is "Autodromo Internazionale Enzo e
+    Dino Ferrari" in iRacing, Laguna Seca has an "at" in it, and Interlagos
+    arrives accented, so an ASCII key could not match it at all. These are
+    TrackDisplayName strings copied from real session dumps."""
+    from ai_race_engineer import pronounce
+    for sent, spoken in (
+            ("Circuit de Spa-Francorchamps", "Spa"),
+            ("Circuit de Barcelona-Catalunya", "Barcelona"),
+            ("Circuit des 24 Heures du Mans", "Le Mans"),
+            ("Mount Panorama Circuit", "Bathurst"),
+            ("Autodromo Internazionale Enzo e Dino Ferrari", "Imola"),
+            ("WeatherTech Raceway at Laguna Seca", "Laguna Seca"),
+            ("Autódromo José Carlos Pace", "Interlagos"),
+            ("Hockenheimring Baden-Württemberg", "Hockenheim"),
+            ("World Wide Technology Raceway (Gateway)", "Gateway")):
+        out = pronounce.apply(f"Box this lap at {sent}, Bart.")
+        assert out == f"Box this lap at {spoken}, Bart.", out
+
+
+def test_a_plural_class_or_a_lap_time_in_seconds_is_not_misread():
+    """"GT3s" came out as "G T three seconds", and a lap time written with
+    a trailing s said "seconds" twice."""
+    from ai_race_engineer import pronounce
+    assert pronounce.for_speech("Lapping the GT3s now.") \
+        == "Lapping the G T threes now."
+    assert pronounce.for_speech("Best was 1:23.4s.") \
+        == "Best was one minute twenty three point four seconds."
+
+
+def test_a_surname_that_is_also_a_radio_word_is_not_replaced():
+    """A rival called Green turned "Green flag" into "Car 12 flag" — a car
+    number where the driver needed a flag. "ee" was on the awkward list
+    though it is one of the commonest pairs in English."""
+    from ai_race_engineer import pronounce
+    from ai_race_engineer.telemetry import Rival
+    table = pronounce.auto_table([Rival(name="Tom Green", car_number="12")])
+    assert pronounce.apply("Green flag, go.", table) == "Green flag, go."
+
+
+def test_a_shared_surname_never_names_the_wrong_car():
+    """Two Szabós in the field: the surname alone mapped to whichever came
+    last, so the engineer called one of them by the other's number."""
+    from ai_race_engineer import pronounce
+    from ai_race_engineer.telemetry import Rival
+    grid = [Rival(name="Anna Szabó", car_number="7"),
+            Rival(name="Bence Szabó", car_number="31")]
+    table = pronounce.auto_table(grid)
+    assert "szabó" not in table and "szabo" not in table, table
+    assert table["anna szabó"] == "car 7"
+    assert table["bence szabó"] == "car 31"
 
 
 def test_the_closing_window_is_actually_reachable():
