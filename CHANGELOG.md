@@ -6,8 +6,48 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+### Added
+
+- Warnings and errors are written to `aire.log` beside `config.json`.
+  `AIRE.exe` has no console, so until now every one of them went nowhere,
+  including the ones meant to be loud because they had already failed in
+  silence once. Only warnings and errors are kept. Your questions and the
+  engineer's answers are not, so the exchange log still lives in memory only.
+
 ### Fixed
 
+- `AIRE.exe --server` never started. It exited at once with nothing
+  logged, because the build has no console and the web server asked the
+  console whether it could show colours. Desktop mode had the same flaw
+  and only worked because a library it loads first happened to cover it.
+- A press that came back with no words was met with silence. Taps are
+  already ignored, so this is a muted or wrong microphone far more often
+  than not, and you could ask into it all stint without finding out. The
+  engineer now says "I lost that one, say again."
+- "How's my fuel?" on the Simulated source, the first test the README
+  suggests, answered "I've got no fuel reading". The simulator still gave
+  fuel only as a percentage, which the fuel calculators no longer read. It
+  now gives litres, a tank size and a burn per lap.
+- A transcription that failed was met with silence. You asked, heard the
+  roger beep, and then nothing, so an ElevenLabs outage sounded exactly like
+  a slow answer. The engineer now says "I have comms issues right now", as it
+  already did when the model failed.
+- The settings panel could freeze the engineer. Loading voices, previewing
+  one, listing or testing models, and listing devices or controllers all
+  waited on the provider or the device on the same loop that hands a
+  push-to-talk question to the pipeline and keeps telemetry fresh. A
+  one-second voice list stalled everything for that second; a slow provider
+  could do so for up to thirty. They now wait off to one side.
+- The first answer after starting AIRE no longer waits for the radio effect
+  to load. It now loads at startup; that wait measured about 0.3 s, and
+  1.3 s on a cold start.
+- Choosing a voice when `config.json` could not be written looked like it
+  worked, and the next launch spoke in the old voice. It now reports the
+  failed write, as every other saved setting does.
+- Switching the telemetry source, or quitting, while a reading was in
+  progress could fail that reading with an error and traceback that looked
+  like a telemetry bug. The reader now finishes the reading before it shuts
+  down.
 - "How's my fuel?" — and every other question asked with a contraction —
   never reached its deterministic answer when speech recognition kept the
   apostrophe. "How's" became "how s" while every phrase table spells it

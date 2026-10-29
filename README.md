@@ -153,6 +153,7 @@ working while iRacing is fullscreen. Use the tray icon to reopen or quit it.
 | **Voice stutters or produces nonsense** | Apply Most stable, keep Style at 0, or say “that was gibberish” to regenerate the last line. |
 | **The window disappeared** | AIRE is still running in the Windows system tray. |
 | **The window is blank** | Install or repair the Microsoft Edge WebView2 Runtime, then restart AIRE. |
+| **Something failed and the panel does not say why** | Read `%APPDATA%\AIRE\aire.log`. AIRE keeps its warnings and errors there. |
 
 ### Updating AIRE
 
@@ -183,7 +184,9 @@ On the computer, AIRE stores API keys in plain text in
 `%APPDATA%\AIRE\config.json`. Treat that file like a password. Synthesized
 answers may be stored in `speech-cache\` so repeated lines do not cost money;
 the cache can be cleared under **Voice → Speech Cache**. The exchange log is
-memory-only and disappears when AIRE exits. Diagnostic recording is off by
+memory-only and disappears when AIRE exits. `aire.log` holds warnings and
+errors only, never your questions or the engineer's answers, although a
+malformed model reply can be quoted in one. Diagnostic recording is off by
 default; when enabled, `diagnostic-trace.jsonl` contains radio text, driver
 names and telemetry.
 

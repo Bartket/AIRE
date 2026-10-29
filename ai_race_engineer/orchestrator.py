@@ -118,6 +118,19 @@ class _Timings:
         return dict(self._reading)
 
 
+def _preload_radio_effect() -> None:
+    """Import scipy's filters now, so the first answer does not wait for them.
+
+    `_apply_radio_effect` imports lazily, which put the import inside the
+    first spoken answer of every run: about 300 ms warm and 1.3 s cold,
+    measured, between the driver's question and the first word.
+    """
+    try:
+        from . import radio_effect  # noqa: F401
+    except ImportError as exc:  # scipy missing; playback falls back to dry
+        logger.debug("Radio effect unavailable: %s", exc)
+
+
 def _irsdk_available() -> bool:
     """Whether the iRacing SDK could be imported at all (Windows only)."""
     try:
@@ -135,6 +148,8 @@ class Orchestrator:
         self.config = config
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        # Held so the task cannot be garbage-collected before it finishes.
+        self._preload: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._busy = threading.Lock()
         self._press_started_at: Optional[float] = None
@@ -254,6 +269,9 @@ class Orchestrator:
         if not audio_available():
             logger.warning("Audio I/O unavailable — voice capture and playback are disabled")
 
+        # Off the loop and not awaited: startup should not wait for it, and a
+        # question asked mid-import simply waits on Python's import lock.
+        self._preload = asyncio.create_task(asyncio.to_thread(_preload_radio_effect))
         self._task = asyncio.create_task(self._telemetry_loop())
         logger.info(
             "Orchestrator started (telemetry=%s, llm=%s/%s, ptt=%s)",
@@ -659,9 +677,20 @@ class Orchestrator:
                         self.stt.transcribe_raw_result, wav_bytes, "audio.wav", None)
         except STTError as exc:
             logger.error("Transcription failed: %s", exc)
-            self._last_error = str(exc)
-            self._status = "listening"
-            self._busy.release()
+            # Every other failure after the roger beep says something; this
+            # one went silent, so a driver who had just asked could not tell
+            # an outage from a slow answer. The phrase never changes, so once
+            # spoken it plays from the speech cache even with ElevenLabs down.
+            try:
+                if self.tts.configured and audio_available():
+                    self._status = "speaking"
+                    await self._speak(COMMS_FAILURE)
+            finally:
+                # Set after speaking, so a synthesis failure on top cannot
+                # overwrite the error that actually explains the silence.
+                self._last_error = str(exc)
+                self._status = "listening"
+                self._busy.release()
             return
         except Exception:
             logger.exception("Transcription crashed")
@@ -672,7 +701,14 @@ class Orchestrator:
         try:
             question = transcription.text
             if not question.strip():
-                logger.info("Nothing was said — skipping")
+                # Not silence: taps are already discarded before transcription,
+                # so this is a deliberate press that came back empty — most
+                # often a muted or wrong microphone. Silent, the driver could
+                # ask into a dead mic all stint and never know.
+                logger.info("Nothing was heard — asking for a repeat")
+                if self.tts.configured and audio_available():
+                    self._status = "speaking"
+                    await self._speak(NO_ANSWER)
                 return
             if should_repeat(transcription):
                 logger.info(

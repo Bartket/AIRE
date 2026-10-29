@@ -127,6 +127,17 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
             brake_rr_temp=295 + throttle_curve * 165,
             fuel_level_pct=fuel_pct,
             fuel_remaining_laps=fuel_laps,
+            # What the calculators read. Without these the fixture had only
+            # the percentage, and "How's my fuel?" — the README's first test —
+            # answered "I've got no fuel reading". A 100 L tank makes the
+            # percentage the litres; 2.4 L a lap is the burn that percentage
+            # already draws down, and 2.4–2.5 the spread in the lap history.
+            fuel_capacity=100.0,
+            fuel_level=round(fuel_pct, 2),
+            fuel_per_lap=round(96.0 / self._race_laps, 3),
+            fuel_burn_samples=min(5, lap - 1),
+            fuel_burn_min=2.4,
+            fuel_burn_max=2.5,
             ahead=Rival(name="M. Rossi", short_name="Rossi, M.", car_number="44",
                         car_class_id=1, car_class_name="Porsche Cup",
                         car_id=1, car_model="Porsche 911 GT3 Cup (992)",

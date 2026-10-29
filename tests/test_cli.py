@@ -85,3 +85,91 @@ def test_forgetting_unsaved_changes_goes_through_the_lock(tmp_path):
     assert config.dirty is False
     config.maybe_save()
     assert not (tmp_path / "config.json").exists()
+
+
+def test_the_log_file_keeps_failures_and_never_the_radio(tmp_path):
+    """The packaged build has no console, so without a file every warning
+    and error it raised went nowhere. The file must not become a transcript:
+    questions and answers are INFO, and the exchange log is promised to stay
+    in memory."""
+    import logging
+
+    path = tmp_path / "AIRE" / "aire.log"
+    root = logging.getLogger()
+    before = list(root.handlers)
+    cli._log_to_file(path)
+    added = [h for h in root.handlers if h not in before]
+    try:
+        log = logging.getLogger("race-engineer")
+        previous_level = log.level
+        log.setLevel(logging.INFO)
+        try:
+            log.info("Question: %r", "how far behind Kowalski am I")
+            log.warning("Could not lower process priority: access denied")
+        finally:
+            log.setLevel(previous_level)
+        for handler in added:
+            handler.flush()
+    finally:
+        for handler in added:
+            root.removeHandler(handler)
+            handler.close()
+
+    written = path.read_text(encoding="utf-8")
+    assert "Could not lower process priority" in written
+    assert "Kowalski" not in written
+
+
+# Starts the way AIRE.exe does, with no console, and runs `main()` as far as
+# uvicorn building its Config — which is where it died. A fresh interpreter,
+# because nulling stdout inside pytest would take the test runner with it.
+_CONSOLELESS = r'''
+import sys
+result_path, config_path = sys.argv[1], sys.argv[2]
+sys.stdout = sys.stderr = None
+
+import uvicorn
+from ai_race_engineer import cli, perf, single_instance
+
+def build_and_stop(app, **kwargs):
+    uvicorn.Config(app, host=kwargs["host"], port=kwargs["port"],
+                   log_level=kwargs["log_level"])
+    return None
+
+uvicorn.run = build_and_stop
+single_instance.find_running = lambda host, port: False
+perf.lower_priority = lambda enabled=True: False
+sys.argv = ["aire", "--server", "--no-browser", "--config", config_path]
+try:
+    outcome = f"returned {cli.main()}"
+except BaseException as exc:
+    outcome = f"{type(exc).__name__}: {exc}"
+with open(result_path, "w", encoding="utf-8") as f:
+    f.write(outcome)
+'''
+
+
+def test_the_server_starts_without_a_console(tmp_path):
+    """`AIRE.exe --server` exited with code 1 and wrote nothing anywhere.
+
+    uvicorn asks `sys.stdout.isatty()`, and a build without a console has no
+    stdout. Desktop mode got away with it only because pywebview, imported
+    first, quietly substitutes one.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    config = tmp_path / "config.json"
+    config.write_text('{"telemetry": {"source": "simulated"}}', encoding="utf-8")
+    result = tmp_path / "result.txt"
+
+    subprocess.run(
+        [sys.executable, "-c", _CONSOLELESS, str(result), str(config)],
+        cwd=root, timeout=60, check=False,
+        env={**os.environ, "PYTHONPATH": str(root)},
+    )
+
+    assert result.read_text(encoding="utf-8") == "returned 0"

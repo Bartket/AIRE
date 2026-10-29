@@ -162,7 +162,10 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
     @app.get("/api/status")
     async def status() -> Dict[str, Any]:
-        return orch.status()
+        # `is_connected()` in here can run irsdk's startup probe, an HTTP
+        # request to the sim with no timeout. This loop is the one the
+        # push-to-talk hand-off lands on, so nothing that can block runs on it.
+        return await asyncio.to_thread(orch.status)
 
     @app.get("/api/telemetry")
     async def telemetry() -> Dict[str, Any]:
@@ -236,18 +239,24 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         # Closed explicitly: these clients are built per request, and an
         # abandoned one holds its TLS connection until the garbage collector
         # happens to run.
-        try:
+        def fetch() -> List[Dict[str, str]]:
             with closing(LLMClient(config)) as client:
-                return {"models": client.list_models()}
+                return client.list_models()
+
+        try:
+            return {"models": await asyncio.to_thread(fetch)}
         except LLMError as exc:
             raise HTTPException(502, str(exc)) from exc
 
     @app.post("/api/llm/test")
     async def llm_test() -> Dict[str, Any]:
         """Round-trip a tiny prompt to validate provider + key + model."""
-        try:
+        def round_trip() -> Dict[str, Any]:
             with closing(LLMClient(config)) as client:
                 return client.test_connection()
+
+        try:
+            return await asyncio.to_thread(round_trip)
         except LLMError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
@@ -255,11 +264,11 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
     @app.get("/api/devices/input")
     async def input_devices() -> List[Dict[str, Any]]:
-        return AudioRecorder().get_input_devices()
+        return await asyncio.to_thread(AudioRecorder().get_input_devices)
 
     @app.get("/api/devices/output")
     async def output_devices() -> List[Dict[str, Any]]:
-        return AudioPlayer().get_output_devices()
+        return await asyncio.to_thread(AudioPlayer().get_output_devices)
 
     @app.post("/api/window/show")
     async def window_show() -> Dict[str, Any]:
@@ -276,7 +285,7 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
     @app.get("/api/ducking_devices")
     async def ducking_devices() -> List[Dict[str, Any]]:
-        return orch.ducking.list_sessions()
+        return await asyncio.to_thread(orch.ducking.list_sessions)
 
     # ── Controllers / sim wheel ─────────────────────────────────────
 
@@ -285,12 +294,17 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         from .controller import ControllerHub
 
         hub = ControllerHub.instance()
-        hub.start()
-        return {
-            "available": hub.available,
-            "error": hub.error,
-            "devices": [d.to_dict() for d in hub.devices()],
-        }
+
+        def listing() -> Dict[str, Any]:
+            # The first start() sleeps up to two seconds waiting for SDL.
+            hub.start()
+            return {
+                "available": hub.available,
+                "error": hub.error,
+                "devices": [d.to_dict() for d in hub.devices()],
+            }
+
+        return await asyncio.to_thread(listing)
 
     @app.post("/api/config/reset")
     async def reset_all() -> Dict[str, Any]:
@@ -347,7 +361,7 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
         timeout = float(payload.get("timeout", 15.0))
         hub = ControllerHub.instance()
-        if not hub.start():
+        if not await asyncio.to_thread(hub.start):
             raise HTTPException(503, hub.error or "Controller support unavailable")
 
         binding = await asyncio.to_thread(hub.capture_next_press, timeout)
@@ -380,18 +394,21 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
     @app.get("/api/voices")
     async def voices() -> Dict[str, Any]:
-        with closing(_tts(config)) as client:
-            try:
+        def fetch() -> Dict[str, Any]:
+            with closing(_tts(config)) as client:
                 listed = client.list_voices()
-            except TTSError as exc:
-                raise HTTPException(502, str(exc)) from exc
-            usable = sum(1 for v in listed if v["available"])
-            return {
-                "voices": listed,
-                "tier": client.tier,
-                "usable": usable,
-                "blocked": len(listed) - usable,
-            }
+                usable = sum(1 for v in listed if v["available"])
+                return {
+                    "voices": listed,
+                    "tier": client.tier,
+                    "usable": usable,
+                    "blocked": len(listed) - usable,
+                }
+
+        try:
+            return await asyncio.to_thread(fetch)
+        except TTSError as exc:
+            raise HTTPException(502, str(exc)) from exc
 
     @app.post("/api/voices/select")
     async def select_voice(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
@@ -402,22 +419,26 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
 
         # Refuse a voice this account cannot synthesize, rather than letting
         # it fail with a 402 mid-session.
-        with closing(_tts(config)) as client:
-            try:
-                match = next((v for v in client.list_voices() if v["id"] == voice_id), None)
-            except TTSError:
-                match = None  # cannot verify — allow, and let synthesis report it
-            if match is not None and not match["available"]:
-                raise HTTPException(
-                    403,
-                    f"'{match['name']}' is a Voice Library voice and your "
-                    f"{client.tier or 'current'} plan cannot use it via the API.",
-                )
+        def refusal() -> Optional[str]:
+            with closing(_tts(config)) as client:
+                try:
+                    match = next((v for v in client.list_voices()
+                                  if v["id"] == voice_id), None)
+                except TTSError:
+                    match = None  # cannot verify — allow, and let synthesis report it
+                if match is None or match["available"]:
+                    return None
+                return (f"'{match['name']}' is a Voice Library voice and your "
+                        f"{client.tier or 'current'} plan cannot use it via the API.")
+
+        refused = await asyncio.to_thread(refusal)
+        if refused:
+            raise HTTPException(403, refused)
 
         config.update(
             {"elevenlabs": {"tts_voice_id": voice_id, "tts_voice_name": name}}
         )
-        config.maybe_save()
+        _save(config)
         orch.apply_config()
         return {"status": "ok", "voice_id": voice_id, "voice_name": orch.tts.voice_name}
 
@@ -430,21 +451,21 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         """
         text = payload.get("text") or "Box this lap, box this lap. Fuel is marginal."
         voice_id = payload.get("voiceId") or payload.get("voice_id") or ""
-        with closing(_tts(config)) as tts:
-            if voice_id:
-                tts.set_voice(voice_id)
-            try:
+
+        def render() -> bytes:
+            with closing(_tts(config)) as tts:
+                if voice_id:
+                    tts.set_voice(voice_id)
                 pcm = tts.synthesize(text)
-            except TTSError as exc:
-                raise HTTPException(502, str(exc)) from exc
+                if payload.get("radio"):
+                    pcm = _apply_radio(config, pcm, tts.sample_rate)
+                return wav_bytes_from_pcm(pcm, tts.sample_rate)
 
-            if payload.get("radio"):
-                pcm = _apply_radio(config, pcm, tts.sample_rate)
-
-            return Response(
-                content=wav_bytes_from_pcm(pcm, tts.sample_rate),
-                media_type="audio/wav",
-            )
+        try:
+            wav = await asyncio.to_thread(render)
+        except TTSError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        return Response(content=wav, media_type="audio/wav")
 
     @app.post("/api/beep")
     async def beep(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:

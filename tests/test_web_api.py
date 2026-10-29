@@ -371,6 +371,27 @@ def test_a_reset_that_cannot_be_written_says_so(tmp_path, monkeypatch):
         assert "Read-only" in response.json()["detail"]
 
 
+def test_a_voice_choice_that_cannot_be_written_says_so(tmp_path, monkeypatch):
+    """The last saving endpoint still on `maybe_save`, which logs and moves on:
+    the panel showed the new voice, and the next launch spoke in the old one."""
+    config = _config(tmp_path)
+    client = _client(config)
+
+    def refuse():
+        raise OSError("Read-only file system")
+
+    def unverifiable(self):
+        raise tts_module.TTSError("offline")
+
+    monkeypatch.setattr(config, "save", refuse)
+    monkeypatch.setattr(tts_module.TTS, "list_voices", unverifiable)
+
+    response = client.post("/api/voices/select", json={"voiceId": "abc"})
+
+    assert response.status_code == 500
+    assert "Read-only" in response.json()["detail"]
+
+
 def test_the_static_mount_asks_about_the_directory_it_mounts(tmp_path):
     """It was conditioned on the panel's directory and mounted the parent."""
     import inspect
@@ -381,3 +402,57 @@ def test_the_static_mount_asks_about_the_directory_it_mounts(tmp_path):
 
     assert "if STATIC_DIR.exists():" in source
     assert "if UI_DIR.exists():" not in source
+
+
+# ── The event loop ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("method, path", [
+    ("GET", "/api/voices"),
+    ("POST", "/api/voices/select"),
+    ("POST", "/api/tts/preview"),
+])
+def test_a_slow_provider_does_not_stall_the_rest_of_the_app(
+        tmp_path, monkeypatch, method, path):
+    """These handlers called ElevenLabs on the event loop itself.
+
+    That loop also runs the telemetry poll and receives every push-to-talk
+    recording, so a voice list taking a second froze the whole app for that
+    second — measured, a 50 ms sleep on the loop took 1006 ms. A question
+    asked while the panel waited on a provider waited with it.
+    """
+    import asyncio
+    import time
+
+    import httpx
+
+    def slow(*_args, **_kwargs):
+        time.sleep(0.5)
+        if path.endswith("preview"):
+            return b"\x11\x22" * 20000
+        return []
+
+    monkeypatch.setattr(tts_module.TTS, "list_voices", slow)
+    monkeypatch.setattr(tts_module.TTS, "synthesize", slow)
+    monkeypatch.setattr(tts_module.TTS, "subscription", lambda self: {})
+    app = create_app(_config(tmp_path))
+
+    async def race():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport,
+                                     base_url=f"http://{PANEL}") as client:
+            # The clock starts before the slow call, not after the pause that
+            # lets it begin: a blocked loop stretches that pause itself, so
+            # timing only the status request would pass with the bug in.
+            began = time.perf_counter()
+            slow_call = asyncio.create_task(client.request(
+                method, path, json={"voiceId": "abc", "text": "Radio check."}))
+            await asyncio.sleep(0.05)
+            status = await client.get("/api/status")
+            waited = time.perf_counter() - began
+            assert (await slow_call).status_code == 200
+            return status.status_code, waited
+
+    code, waited = asyncio.run(race())
+
+    assert code == 200
+    assert waited < 0.3, f"/api/status waited {waited:.2f}s behind {path}"

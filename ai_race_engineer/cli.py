@@ -3,9 +3,12 @@
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import threading
 import webbrowser
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from . import perf, single_instance
 
@@ -13,6 +16,9 @@ logger = logging.getLogger("race-engineer")
 
 APP_HOST = "127.0.0.1"
 APP_PORT = 9420  # "9420" on a phone keypad → "AI RACE"
+
+_LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+_LOG_FILE_BYTES = 1024 * 1024
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,12 +170,50 @@ def _serve(config, args) -> int:
     return 0
 
 
+def _log_to_file(path: Path) -> None:
+    """Keep warnings and errors where the packaged build can find them.
+
+    AIRE.exe is built without a console, so it has no stderr, and every
+    warning and error went nowhere in the build drivers actually run —
+    including the ones written to be loud because they once failed in
+    silence. WARNING and up only: questions and answers are logged at INFO,
+    and the exchange log is promised to stay in memory.
+
+    Never raises. A log that cannot be opened is not a reason not to start.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            path, maxBytes=_LOG_FILE_BYTES, backupCount=1, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not open the log file %s: %s", path, exc)
+        return
+    handler.setLevel(logging.WARNING)
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+
+
+def _stand_in_for_a_missing_console() -> None:
+    """Give a process with no console somewhere to write.
+
+    AIRE.exe is built without a console, so `sys.stdout` and `sys.stderr`
+    are None, and uvicorn calls `sys.stdout.isatty()` while it configures
+    logging. `--server` died there at startup — exit code 1, nothing logged.
+    Desktop mode only survived because importing pywebview happens to make
+    this same substitution first, which is not something to stand on.
+    """
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+
+
 def main() -> int:
+    _stand_in_for_a_missing_console()
     args = build_parser().parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        format=_LOG_FORMAT,
         datefmt="%H:%M:%S",
     )
     if not args.verbose:
@@ -187,6 +231,10 @@ def main() -> int:
             print("Raised its window." if raised
                   else f"Open http://{args.host}:{args.port}/ to reach it.")
             return 0
+        # Only the long-running app writes the file: a one-shot run beside a
+        # live one would share it, and rotation fails on Windows while the
+        # other process holds it open.
+        _log_to_file(config.path.parent / "aire.log")
 
     # Yield to the sim before anything heavy starts.
     perf.lower_priority(config.performance.get("low_priority", True))

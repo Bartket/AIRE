@@ -610,12 +610,16 @@ class iRacingTelemetryReader(TelemetryAdapter):
             return False
 
     def shutdown(self) -> None:
-        if self._ir is not None and self._started:
-            try:
-                self._ir.shutdown()
-            except Exception:
-                pass
-            self._started = False
+        # Under the same lock as a read: a source swap and app exit both call
+        # this while the poll thread may be between freeze and unfreeze, and
+        # tearing pyirsdk down under it failed that read with a traceback.
+        with self._lock:
+            if self._ir is not None and self._started:
+                try:
+                    self._ir.shutdown()
+                except Exception:
+                    pass
+                self._started = False
 
     def pit_commands_ready(self) -> Tuple[bool, str]:
         """Writes are allowed only with live state and the driver in the car."""

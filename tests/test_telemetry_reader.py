@@ -772,3 +772,35 @@ def test_tyre_readings_are_current_in_the_box_and_not_assumed_anywhere_else(
     assert reader._tyre_fresh() is True
     clock[0] += 200
     assert reader._tyre_fresh() is False
+
+
+def test_shutdown_waits_for_a_read_in_progress():
+    """Every reader method took the lock but this one.
+
+    A source swap in the panel and app exit both call it while the poll
+    thread may be between freeze and unfreeze, and tearing pyirsdk down under
+    that read failed it with a traceback — one that reads like a telemetry
+    bug and is not.
+    """
+    import threading
+
+    class _Closable:
+        closed = 0
+
+        def shutdown(self):
+            self.closed += 1
+
+    reader = _Reader()
+    reader._ir = _Closable()
+    reader._started = True
+
+    with reader._lock:                      # a poll mid-read
+        closer = threading.Thread(target=reader.shutdown, daemon=True)
+        closer.start()
+        closer.join(timeout=0.2)
+        assert closer.is_alive(), "shutdown ran underneath a read"
+        assert reader._ir.closed == 0
+
+    closer.join(timeout=2.0)
+    assert reader._ir.closed == 1
+    assert reader._started is False
