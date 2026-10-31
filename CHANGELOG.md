@@ -73,6 +73,9 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- Grading a practice or qualifying trace failed every time given to the
+  hundredth, which the engineer says there on purpose. Only a race now
+  fails a hundredth; practice and qualifying fail a thousandth.
 - "Am I under investigation?", "did I get a penalty for that?" and every
   other race-control question outside eight exact phrasings went to the
   model with nothing to call, and it read the raw flag lines itself. Race

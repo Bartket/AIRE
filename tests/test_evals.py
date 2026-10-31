@@ -123,3 +123,18 @@ def test_the_model_check_snapshot_only_holds_what_irsdk_publishes():
     assert race_math.dispatch("gap_to", {"target": "Silva"}, snapshot)["available"]
     assert snapshot.car.brake_fl_temp is None
     assert snapshot.car.tyre_data_live is False
+
+
+def test_practice_hundredths_are_allowed_and_thousandths_are_not():
+    """Outside a race the hundredths are said on purpose — they separate two
+    drivers — so the grader failing them contradicted the engineer's own
+    rule. Thousandths still help nobody."""
+    def graded(answer, session):
+        return grade_record({"question": "how far off am I?", "route": None,
+                             "snapshot": {"session_type": session}}, answer)
+
+    assert graded("You're 0.85 seconds off the session best.", "Practice") == []
+    assert graded("You're 0.853 seconds off.", "Open Qualify") == \
+        ["answer gives a time to the thousandth"]
+    assert graded("You're 0.85 seconds off.", "Race") == \
+        ["race-speed answer gives a time to the hundredth"]

@@ -99,8 +99,14 @@ def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[s
     # What made the radio sound read off a spreadsheet: a time said to the
     # hundredth ("1.51 seconds"), and a rival named the way the roster
     # abbreviates them ("M. Rossi"). Neither helps a driver at speed.
-    if not finished and re.search(r"\b\d+\.\d{2,}\s*seconds\b", spoken):
+    # In a race that is anything finer than a tenth. In practice and
+    # qualifying the hundredths separate two drivers and are said on
+    # purpose (race_math.lap_digits), so only thousandths fail there.
+    in_race = session_kind(str(snapshot.get("session_type") or "")) == "race"
+    if not finished and in_race and re.search(r"\b\d+\.\d{2,}\s*seconds\b", spoken):
         failures.append("race-speed answer gives a time to the hundredth")
+    if not finished and not in_race and re.search(r"\b\d+\.\d{3,}\s*seconds\b", spoken):
+        failures.append("answer gives a time to the thousandth")
     if re.search(r"\b[A-Z]\. [A-Z][a-z]", spoken):
         failures.append("rival named by initial instead of surname")
     return failures
