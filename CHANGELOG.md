@@ -8,6 +8,13 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Changed
 
+- The status bar says what is going on in plain words. What the engineer is
+  doing — listening, recording, thinking, speaking — is a badge on the left;
+  each check on the right is a button that opens the tab that fixes it.
+  Something not set up yet is amber ("Add an ElevenLabs key") and only
+  something broken is red, where a first run used to show five red dots.
+  Speech recognition and voice are one item, since they share one key, and
+  a pill appears while pit commands are on.
 - The settings panel is quieter. Each hint is a line saying what the control
   does, with a **More** link to the README for why; settings most drivers
   never touch (endpoint, temperature, token budget, voice sliders, radio
