@@ -1167,7 +1167,12 @@ def race_control_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]
     if car.penalty:
         spoken = car.penalty[0].upper() + car.penalty[1:] + "."
     elif car.flag:
-        spoken = f"{car.flag}." if "flag" in car.flag.lower() else f"{car.flag} flag."
+        # Asked "did I get a penalty", a bare "Green flag." left the question
+        # unanswered. The penalty comes from the same flag bits, so none set
+        # is a reading, not a guess — "showing", because a time penalty added
+        # after the flag carries no flag at all.
+        flag = car.flag if "flag" in car.flag.lower() else f"{car.flag} flag"
+        spoken = f"{flag}, no penalty showing."
     else:
         return _no("Nothing from race control right now.")
     return _yes(spoken, flag=car.flag or None, penalty=car.penalty)
@@ -2451,6 +2456,20 @@ _TOOLS: List[Dict[str, Any]] = [
         ),
         "parameters": {"type": "object", "properties": {}},
         "fn": session_status,
+    },
+    {
+        "name": "race_control_report",
+        "description": (
+            "The flag being shown to the driver and any penalty they are "
+            "serving, worded as race control would say it. Use for 'what's "
+            "this flag', 'have I got a penalty', 'am I under investigation' "
+            "and anything about race control. iRacing publishes only the "
+            "current flag and a penalty already given — there is no signal "
+            "for an investigation or a steward's decision still to come, so "
+            "never suggest one."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+        "fn": race_control_report,
     },
     {
         "name": "race_history",

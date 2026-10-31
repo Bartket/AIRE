@@ -46,7 +46,7 @@ _MAX_TOOL_ROUNDS = 2
 # incompatible units. A single direct call to one of these is therefore the
 # answer, not material for another model pass.
 _TERMINAL_TOOLS = {"fuel_plan", "pit_window", "position_report",
-                   "adjacent_gap_trend", "car_resources"}
+                   "adjacent_gap_trend", "car_resources", "race_control_report"}
 # Headroom for emitting a tool call, which does not fit the speech budget.
 _TOOL_CALL_TOKENS = 512
 # Room for a reasoning model to think *and* still answer. The speech budget

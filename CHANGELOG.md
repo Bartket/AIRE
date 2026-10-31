@@ -64,6 +64,12 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- "Am I under investigation?", "did I get a penalty for that?" and every
+  other race-control question outside eight exact phrasings went to the
+  model with nothing to call, and it read the raw flag lines itself. Race
+  control is now one of the engineer's calculators, spoken as written. With
+  a clean flag it says so: "Green flag, no penalty showing." iRacing has no
+  signal for an investigation, so the engineer never suggests one.
 - With simulated telemetry, "how far am I behind Silva?" — any gap to a
   named car — answered "I can't place you in the order right now". The
   simulated field never said which car was yours. Live telemetry was not

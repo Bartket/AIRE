@@ -422,3 +422,28 @@ def test_the_model_is_handed_a_tool_result_at_radio_precision():
     payload = json.loads(tool_turn["content"])
     assert payload["pace_delta_per_lap"] == -0.9
     assert not re.search(r"\d+\.\d{2,}", tool_turn["content"])
+
+
+def test_race_control_is_reachable_from_any_phrasing_and_spoken_as_written():
+    """It was reachable only through eight exact phrases in the deterministic
+    router. "Am I under investigation?" went to the model with no calculator
+    to call, and the model read the raw flag and penalty lines itself."""
+    from ai_race_engineer import race_math
+
+    assert "race_control_report" in {
+        t["function"]["name"] for t in race_math.tool_schemas()}
+
+    snapshot = _leader_snapshot()
+    snapshot.car.flag = "Black"
+    snapshot.car.penalty = "drive-through for speeding in the pit lane"
+    client = _scripted([
+        {"finish_reason": "tool_calls", "message": {
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "race_control_report", "arguments": "{}"}}]}},
+    ])
+
+    answer = client.generate("Am I under investigation?", snapshot)
+
+    assert answer == "Drive-through for speeding in the pit lane."
+    assert client.last_route == "tool:race_control_report"

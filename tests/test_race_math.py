@@ -3371,3 +3371,16 @@ def test_a_sentence_and_its_own_figures_round_the_same_way():
         result = rm.radio_precision(rm.dispatch(name, args, snapshot), snapshot.track)
         assert "9 tenths" in result["spoken"], (name, result["spoken"])
         assert abs(result[field]) == 0.9, (name, result[field])
+
+
+def test_a_clean_flag_says_there_is_no_penalty():
+    """Live, "did I get a penalty for that?" reached race_control_report and
+    was answered "Green flag." — true, and no answer to the question. The
+    penalty is decoded from the same flag bits, so none set is a reading."""
+    car = _car(flag="Green", penalty=None)
+    spoken = rm.race_control_report(car, TrackConfig(session_type="Race"))["spoken"]
+
+    assert spoken == "Green flag, no penalty showing."
+    assert rm.race_control_report(_car(flag="Black", penalty="slow-down penalty"),
+                                  TrackConfig(session_type="Race"))["spoken"] \
+        == "Slow-down penalty."
