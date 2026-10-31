@@ -260,7 +260,7 @@ def test_a_required_stop_is_not_a_call_to_pit_now_on_a_nearly_full_tank():
     from ai_race_engineer.telemetry import TelemetrySnapshot
     block = PromptBuilder(AppConfig()).build_user_turn(
         "Race status", TelemetrySnapshot(car, track), tools_enabled=False)
-    assert "stay out for now" in block
+    assert "stay out for now" in block.lower()
     assert "call the driver in" not in block
 
 
@@ -370,8 +370,9 @@ def test_position_report_prefers_adjacent_battle_gaps_over_gap_to_leader():
 
     assert result["available"]
     assert "P7" in result["spoken"]
-    assert "Sean Ambrose" in result["spoken"] and "1.10 seconds ahead" in result["spoken"]
-    assert "Mike Gladfelter" in result["spoken"] and "0.30 seconds behind" in result["spoken"]
+    # Surnames and gaps to a tenth, the way the radio says them.
+    assert "Ambrose 1.1 seconds ahead" in result["spoken"]
+    assert "Gladfelter 3 tenths behind" in result["spoken"]
     assert "leader" not in result["spoken"].lower()
 
 
@@ -2036,7 +2037,7 @@ def test_adjacent_gap_tool_reports_timing_change_without_contact_prediction():
     assert result["confidence"] == "confirmed"
     assert result["contact_seconds"] is None
     assert result["gap_change_seconds"] == 0.3
-    assert "mini-sectors" in result["spoken"]
+    assert "3 tenths of a second" in result["spoken"]
     assert "metres per second" not in result["spoken"]
     assert "lap" not in result["spoken"].lower()
     assert result["spoken"].count("Rossi") == 1
@@ -2730,7 +2731,7 @@ def test_position_intent_uses_the_adjacent_gap_without_asking_the_model():
     answer = client.generate("Position status", telemetry)
 
     assert answer == rm.position_report(car, telemetry.track)["spoken"]
-    assert "Sean Ambrose" in answer and "leader" not in answer.lower()
+    assert "Ambrose" in answer and "leader" not in answer.lower()
 
 
 def test_adjacent_movement_intent_uses_the_short_calculator_answer_directly():
@@ -2750,7 +2751,7 @@ def test_adjacent_movement_intent_uses_the_short_calculator_answer_directly():
     answer = client.generate("Am I catching the car in front?", telemetry)
 
     assert answer == rm.adjacent_gap_trend(car, telemetry.track, "ahead")["spoken"]
-    assert answer.count("Sean Ambrose") == 1
+    assert answer.count("Ambrose") == 1
     assert "Measured over" not in answer
 
 
@@ -3156,8 +3157,9 @@ def test_every_fuel_clause_is_either_on_the_radio_or_deliberately_not():
     assert not set(rm._FUEL_RADIO_ORDER) - reachable, \
         "the radio asks for a clause fuel_plan never produces"
     # Spoken only when the model is doing the talking: the stop count already
-    # carries the decision, and the burn rate was not what was asked.
-    assert reachable - set(rm._FUEL_RADIO_ORDER) == {"burn", "verdict"}
+    # carries the decision, and the burn rate was not what was asked. The tank
+    # amount is said when the question asks how much — see `fuel_radio`.
+    assert reachable - set(rm._FUEL_RADIO_ORDER) == {"burn", "verdict", "tank"}
 
 
 # ── "Status": the place, the gaps, and only what needs acting on ─────

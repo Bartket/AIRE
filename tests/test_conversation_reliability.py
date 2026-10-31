@@ -308,3 +308,50 @@ def test_a_sentence_cut_short_by_thinking_is_retried_not_spoken():
         {"finish_reason": "stop", "message": cut["message"]},
         {"completion_tokens": 512,
          "completion_tokens_details": {"reasoning_tokens": 484}})
+
+
+# ── What the model says that it did not mean to ─────────────────────────
+
+def _answering(reply, finished=False):
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+    from ai_race_engineer.telemetry import CarTelemetry, TelemetrySnapshot, TrackConfig
+
+    client = LLMClient(AppConfig({"driver_callsign": "Bart", "llm": {
+        "provider": "local", "use_tools": "off",
+        "local": {"endpoint": "http://127.0.0.1:11434/v1", "model": "m"}}}))
+    client._chat_raw = lambda messages, max_tokens=None, tools=None, **kw: {
+        "content": reply}
+    snapshot = TelemetrySnapshot(
+        CarTelemetry(), TrackConfig(session_type="Race", finished=finished,
+                                    driver_name="Bart Kowal"))
+    return client, snapshot
+
+
+def test_a_draft_and_its_correction_are_not_both_spoken():
+    """Measured on air: the model answered, wrote itself a note about the word
+    limit, and answered again — and all three paragraphs were spoken."""
+    client, snapshot = _answering(
+        "Yes, Rossi is quicker by about 0.9 seconds a lap.\n\n"
+        "Wait, I need to keep that to one sentence under 25 words.\n\n"
+        "Yes, Rossi's about eight tenths quicker on best laps.")
+
+    answer = client.generate("Is Rossi faster than me?", snapshot)
+
+    assert answer == "Yes, Rossi's about eight tenths quicker on best laps."
+
+
+def test_the_drivers_name_is_not_used_to_address_them_mid_session():
+    """In a third of answers, measured — "Eighteen laps to go, Bart"."""
+    client, snapshot = _answering("Eighteen laps to go, Bart.")
+
+    assert client.generate("How many laps left?", snapshot) == "Eighteen laps to go."
+
+
+def test_the_debrief_keeps_the_name_and_its_sentences():
+    client, snapshot = _answering(
+        "Great drive, Bart.\n\nP4 from P7 is a proper result.", finished=True)
+
+    answer = client.generate("How did that go?", snapshot)
+
+    assert "Bart" in answer and "P4 from P7" in answer

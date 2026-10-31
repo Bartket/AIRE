@@ -93,3 +93,18 @@ def test_a_race_clock_answer_is_not_graded_as_a_qualifying_one():
                      "time_remaining": 1200.0},
     }
     assert grade_record(record) == []
+
+
+def test_the_grader_catches_an_answer_read_off_a_spreadsheet():
+    """Both shapes reached the radio, measured: gaps in hundredths and rivals
+    by roster initial. The grader is what stops them coming back unnoticed."""
+    failures = grade_record(_record(
+        "You're P4; M. Rossi 1.51 seconds ahead, J. Kowalski 2.17 seconds behind."))
+
+    assert "race-speed answer gives a time to the hundredth" in failures
+    assert "rival named by initial instead of surname" in failures
+
+
+def test_the_grader_passes_the_radio_wording():
+    assert grade_record(_record(
+        "You're P4. Rossi a second and a half ahead, Kowalski 2.2 seconds behind.")) == []

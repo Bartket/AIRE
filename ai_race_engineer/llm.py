@@ -11,6 +11,7 @@ Pick one with ``llm.provider`` in config.json, or from the web UI.
 
 import json
 import logging
+import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
@@ -119,8 +120,8 @@ def _direct_telemetry_answer(
         "are we good on fuel", "am i good on fuel",
     }
     if normalised in fuel_phrases:
-        return race_math.fuel_plan(
-            telemetry.car, telemetry.track).get("spoken")
+        return race_math.fuel_radio(
+            race_math.fuel_plan(telemetry.car, telemetry.track), question)
 
     pit_phrases = {
         "pit window", "whats my pit window", "what is my pit window",
@@ -264,7 +265,8 @@ class LLMClient:
             if tools_enabled:
                 text = self._chat_with_tools(
                     messages, telemetry,
-                    self._build_messages(question, telemetry, False))
+                    self._build_messages(question, telemetry, False),
+                    question=question)
             else:
                 text = self._chat(messages, max_tokens=self._reply_budget)
         except LLMError as exc:
@@ -272,6 +274,9 @@ class LLMClient:
             return COMMS_FAILURE
 
         text = _clean_response(text)
+        if not finished:
+            text = _last_paragraph(text)
+            text = _drop_vocative(text, self._driver_names(telemetry), question)
         if not text:
             # Reached the model, got nothing back. Saying "comms issues"
             # here points the driver — and whoever debugs it — at the
@@ -281,6 +286,15 @@ class LLMClient:
 
         self._history.append((question, text))
         return text
+
+    def _driver_names(self, telemetry: Optional[TelemetrySnapshot]) -> List[str]:
+        """Every form of the driver's name the model might address them by."""
+        callsign = str(getattr(self._config, "driver_callsign", "") or "").strip()
+        full = (getattr(getattr(telemetry, "track", None), "driver_name", "") or "").strip()
+        first = full.split()[0] if full else ""
+        # Longest first, so "Bart Kowal" goes before "Bart" can leave "Kowal".
+        return sorted({n for n in (callsign, full, first) if len(n) > 1},
+                      key=len, reverse=True)
 
     def interpret_pit_command(
         self, request: str, tire_compounds: Sequence[str]
@@ -420,6 +434,7 @@ If the requested tyre type is not in that list, use ambiguous."""
     def _chat_with_tools(
         self, messages: List[Dict[str, Any]], telemetry: Optional[TelemetrySnapshot],
         fallback_messages: Optional[List[Dict[str, Any]]] = None,
+        question: str = "",
     ) -> str:
         """Chat, running any calculator the model asks for, then answer.
 
@@ -474,6 +489,8 @@ If the requested tyre type is not in that list, use ambiguous."""
                 self._last_route = f"tool:{name}"
                 logger.info("tool %s(%s) -> %s", name, args, result.get("spoken"))
                 if len(calls) == 1 and name in _TERMINAL_TOOLS:
+                    if name == "fuel_plan":
+                        return race_math.fuel_radio(result, question)
                     return result.get("spoken", "")
                 computed = result.get("spoken", "") or computed
                 convo.append({
@@ -699,6 +716,42 @@ def _clean_response(text: str) -> str:
         if text.startswith(prefix):
             text = text[len(prefix):]
     return text.strip().strip("`").strip()
+
+
+def _last_paragraph(text: str) -> str:
+    """During a session, only the model's final paragraph is the answer.
+
+    The answer is one sentence. A reply in several paragraphs is a draft, a
+    note to itself, and a restatement — "…0.9 seconds a lap faster. / Wait, I
+    need to keep that to one sentence under 25 words. / Yes, Rossi's about
+    eight tenths quicker" — and all three were spoken. The last one is the
+    one it meant.
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    return paragraphs[-1] if paragraphs else (text or "").strip()
+
+
+def _drop_vocative(text: str, names: Sequence[str], question: str = "") -> str:
+    """Take the driver's name out of an answer that only used it to address them.
+
+    The prompt asks for the name rarely and the model used it in a third of
+    calls; told outright not to, it said it and retracted it on air. A name
+    at the edge of a clause — "…, Bart." or "Bart, …" — is address, never
+    information, so it comes out here. Mid-sentence it is left alone, since a
+    rival can share a first name. If the driver asked about their name, the
+    answer is about the name and nothing is touched.
+    """
+    if not text or "name" in (question or "").lower():
+        return text
+    for name in names:
+        if not name:
+            continue
+        quoted = re.escape(name)
+        text = re.sub(rf",\s*{quoted}(?=[.,!?;:]|$)", "", text)
+        stripped = re.sub(rf"^{quoted},\s+", "", text)
+        if stripped != text:
+            text = stripped[:1].upper() + stripped[1:]
+    return text
 
 
 def _parse_args(raw: Any) -> Dict[str, Any]:

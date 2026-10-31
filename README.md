@@ -606,6 +606,16 @@ answer is worse than no name. Set something short you like hearing. Your real
 name stays available if you ask for it directly, but is never volunteered.
 Leave it blank to use whatever the sim supplies.
 
+During a session the engineer doesn't address you by name: it is taken out
+of any answer that only used it to get your attention. After the flag the
+debrief uses it.
+
+**Engineer → System Prompt** sets how the engineer sounds — how short, how
+dry, what it calls a rival. The rules that stop it inventing numbers, corners
+or anything it cannot see are added whatever the box says, so rewriting it
+cannot switch them off. Leave it blank, or press **Restore default prompt**,
+for the shipped one.
+
 <p align="center">
 <img src="docs/images/audio.png" alt="Audio ducking and volume" width="820">
 </p>

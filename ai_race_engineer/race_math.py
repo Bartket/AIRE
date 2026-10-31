@@ -29,6 +29,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import car_names, pronounce
+from .keyterms import _surname as _surname_of
 from .telemetry import (CarTelemetry, Rival, TelemetrySnapshot, TrackConfig,
                         session_kind)
 
@@ -148,6 +149,77 @@ def _spoken_delta(value: float) -> str:
     if hundredths % 10 == 0:
         return f"{hundredths // 10} tenths of a second"
     return f"{hundredths} hundredths of a second"
+
+
+def _spoken_gap(seconds: float) -> str:
+    """A gap to another car, to the tenth an engineer actually says.
+
+    Not `_spoken_delta`: a lap or sector delta can need its hundredths, a
+    gap that swings every corner cannot use them. Spoken word for word, the
+    hundredths were "one point five one seconds" — the thing that made the
+    radio sound read off a spreadsheet, and against the prompt's own rule of
+    gaps to a tenth.
+    """
+    value = round(abs(float(seconds)), 1)
+    if value < 0.1:
+        return "under a tenth"
+    if value < 1:
+        tenths = round(value * 10)
+        return "a tenth" if tenths == 1 else f"{tenths} tenths"
+    if value == 1.0:
+        return "a second"
+    if value == 1.5:
+        return "a second and a half"
+    if value.is_integer():
+        return f"{value:.0f} seconds"
+    return f"{value:.1f} seconds"
+
+
+def _spoken_margin_laps(laps: float) -> Optional[str]:
+    """A fuel margin in laps, rounded down to the half lap.
+
+    Down, never to nearest: "a lap and a half spare" said over 1.4 laps of
+    fuel is a promise the tank cannot keep. Under half a lap there is no
+    honest round figure, so this returns None and the caller says it is
+    tight instead.
+    """
+    # The epsilon is float noise, not generosity: 4.8 / 3.2 is 1.4999…, and
+    # without it an exact lap and a half was floored to "a lap".
+    halves = math.floor(max(0.0, float(laps)) * 2 + 1e-9)
+    if halves < 1:
+        return None
+    whole, half = divmod(halves, 2)
+    if whole == 0:
+        return "half a lap"
+    if whole == 1:
+        return "a lap and a half" if half else "a lap"
+    if whole >= 4:
+        return f"about {whole} laps"
+    return f"{whole} and a half laps" if half else f"{whole} laps"
+
+
+_AMOUNT_WORDS = ("how much", "litres", "liters", "gallons", "kilos",
+                 "in the tank", "on board")
+
+
+def asks_for_amount(question: str) -> bool:
+    """Whether a fuel question wants the quantity, not just the verdict.
+
+    "How's my fuel?" is a yes-or-no question and gets the verdict. "How much
+    fuel have I got?" is asked for the number. One classifier, here, for both
+    routes that speak `fuel_plan` word for word.
+    """
+    q = str(question or "").lower()
+    return any(word in q for word in _AMOUNT_WORDS)
+
+
+def fuel_radio(result: Dict[str, Any], question: str) -> str:
+    """`fuel_plan`'s radio line, with the tank amount when it was asked for."""
+    spoken = result.get("spoken", "")
+    tank = (result.get("clauses") or {}).get("tank")
+    if tank and asks_for_amount(question):
+        return f"{tank} {spoken}"
+    return spoken
 
 
 def _plural(count: float, word: str) -> str:
@@ -593,9 +665,11 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     # inventing a target and answering "you will make it".
     if target_laps is None and not _is_race(track):
         laps_of_fuel = have / typical_burn
+        # Whole laps, rounded down: a range is a promise, and the burn rate
+        # is for the driver who asks for it, not for every fuel question.
         return _yes(
-            f"You've got {have:.1f} {unit} on board, about {laps_of_fuel:.1f} laps "
-            f"at {typical_burn:.2f} {unit} a lap.",
+            f"You've got {have:.1f} {unit} on board, about "
+            f"{_plural(math.floor(laps_of_fuel), 'lap')} of fuel.",
             fuel_in_tank=round(have, 2), unit=unit,
             burn_per_lap=round(typical_burn, 3),
             burn_per_lap_low=round(burn_low, 3),
@@ -716,8 +790,26 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
 
     if margin >= 0:
         spare_laps = margin / per_lap
-        headline = (f"Fuel is good — {have:.1f} {unit} for {laps_word} laps, "
-                    f"{margin:.1f} {unit} spare, about {spare_laps:.1f} laps in hand.")
+        # The verdict and the margin, once. This used to carry four figures —
+        # tank, laps, litres spare and laps spare, the last two the same fact
+        # twice — for a question that asked whether it is fine. The amount
+        # is a clause, said when the question asks how much.
+        spare = _spoken_margin_laps(spare_laps)
+        # "To the end" only when the end is what was asked about: a model
+        # asking for the next twenty minutes, or the next ten laps, gets the
+        # target named instead of a finish it never asked about.
+        if target_laps is not None or target_minutes is not None:
+            reaches = f"Fuel's fine for the next {laps_word} laps"
+        elif timed_estimate:
+            reaches = "Fuel looks fine to the end at this pace"
+        else:
+            reaches = "Fuel's fine to the end"
+        headline = (f"{reaches}, {spare} spare." if spare
+                    else f"{reaches}, but only just, under half a lap spare.")
+        # The amount, and the spare in litres beside it: the model reads this
+        # clause as worked-out material too, and must not subtract to get it.
+        clauses["tank"] = (f"{have:.1f} {unit} on board for {laps_word} laps, "
+                           f"{margin:.1f} {unit} spare.")
         save = None
         save_basis = None
         stop_required = False
@@ -891,8 +983,7 @@ def pit_window(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
 
     if laps_of_fuel >= laps:
         return _yes(
-            f"No stop needed — {have:.1f} {getattr(car, 'fuel_unit', 'litres')} "
-            f"covers the {laps:.0f} laps left.",
+            "No stop needed, fuel gets you to the end.",
             stop_required=False, laps_to_go=round(laps, 1),
             stops_required=0, pit_now=False, window_open=False,
             laps_on_current_fuel=laps_on_current_fuel,
@@ -902,21 +993,21 @@ def pit_window(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     if stops is not None:
         count = "One stop is" if stops == 1 else f"{stops} stops are"
         if window["pit_now"]:
-            spoken = (f"{count} required; I'd stop this lap because the first fuel "
-                      f"window closes now.")
+            spoken = f"{count} required. I'd stop this lap, the first window closes now."
         elif window["window_open"]:
-            spoken = (f"{count} required. The first window is open and closes on "
-                      f"lap {latest}; about {laps_of_fuel:.1f} laps of fuel left.")
+            spoken = (f"{count} required. The window's open, closes on lap {latest}, "
+                      f"and you've got about "
+                      f"{_plural(math.floor(laps_of_fuel), 'lap')} of fuel.")
         else:
-            spoken = (f"{count} required. The first window is lap {earliest} to "
-                      f"lap {latest}; stay out for now.")
+            spoken = (f"{count} required. Stay out for now, the window is lap "
+                      f"{earliest} to {latest}.")
     else:
         if window["pit_now"]:
-            spoken = ("I'd stop this lap because the current tank is at its limit; "
-                      "I haven't got the tank capacity to count the remaining stops.")
+            spoken = ("I'd stop this lap, the tank is at its limit. I can't count "
+                      "the stops after that without the tank size.")
         else:
-            spoken = (f"Stay out for now; stop by lap {latest}. I haven't got the "
-                      f"tank capacity to count the remaining stops.")
+            spoken = (f"Stay out for now, stop by lap {latest}. I can't count the "
+                      f"stops after that without the tank size.")
 
     return _yes(
         spoken,
@@ -938,7 +1029,7 @@ def car_resources(car: CarTelemetry, track: TrackConfig, topic: str) -> Dict[str
     key = " ".join(str(topic or "").lower().replace("-", " ").split())
     if key in ("pits", "pit open", "pits open"):
         if car.pits_open is None:
-            return _no("I haven't got pit-lane availability.")
+            return _no("Nothing on the pit lane from here.")
         return _yes(
             f"The pits are {'open' if car.pits_open else 'closed'}.",
             topic="pits", pits_open=car.pits_open)
@@ -961,7 +1052,7 @@ def car_resources(car: CarTelemetry, track: TrackConfig, topic: str) -> Dict[str
         count = car.push_to_pass_count
         active = car.push_to_pass_active
         if count is None and active is None:
-            return _no("I haven't got push-to-pass status for this car.")
+            return _no("Nothing on push-to-pass from here.")
         bits = []
         if active is not None:
             bits.append("Push-to-pass is active" if active else "Push-to-pass is not active")
@@ -976,7 +1067,7 @@ def car_resources(car: CarTelemetry, track: TrackConfig, topic: str) -> Dict[str
     if key in ("joker", "joker lap", "joker laps"):
         count = car.joker_laps_remaining
         if count is None and car.on_joker_lap is None:
-            return _no("I haven't got joker-lap status in this session.")
+            return _no("Nothing on joker laps from here.")
         if car.on_joker_lap:
             spoken = "You're on the joker lap now"
             if count is not None:
@@ -1023,7 +1114,7 @@ def race_control_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]
     elif car.flag:
         spoken = f"{car.flag}." if "flag" in car.flag.lower() else f"{car.flag} flag."
     else:
-        return _no("I've got no race-control status right now.")
+        return _no("Nothing from race control right now.")
     return _yes(spoken, flag=car.flag or None, penalty=car.penalty)
 
 
@@ -1096,9 +1187,24 @@ def gap_to(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]
     )
 
 
-def _radio_rival_name(rival: Rival) -> str:
-    """One compact identifier for a rival; never repeat name plus car number."""
-    return rival.name or (f"car {rival.car_number}" if rival.car_number else "the car")
+def _radio_rival_name(rival: Rival, track: Optional[TrackConfig] = None) -> str:
+    """What an engineer calls a rival: the surname, once.
+
+    The full roster name was spoken every time — "Marco Rossi", or from an
+    abbreviated roster "M. Rossi", read out as "em Rossi". Nobody on a pit
+    wall talks like that. The surname is enough unless another car in this
+    field shares it, and then only the full name says which one.
+    """
+    name = (rival.name or "").strip()
+    if not name:
+        return f"car {rival.car_number}" if rival.car_number else "the car"
+    surname = _surname_of(name)
+    if not surname:
+        return name
+    field = getattr(track, "field", None) or []
+    namesakes = sum(1 for other in field
+                    if (_surname_of(other.name or "") or "").lower() == surname.lower())
+    return name if namesakes > 1 else surname
 
 
 def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
@@ -1134,27 +1240,32 @@ def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     if _is_race(track):
         if car.ahead is not None and car.ahead.gap is not None:
             adjacent.append(
-                f"{_radio_rival_name(car.ahead)} {car.ahead.gap:.2f} seconds ahead")
+                f"{_radio_rival_name(car.ahead, track)} "
+                f"{_spoken_gap(car.ahead.gap)} ahead")
         elif car.position == 1:
             bits[0] = "You're leading" + (
                 f", P{car.class_position} in class"
                 if car.class_position and car.class_position != 1 else "")
         if car.behind is not None and car.behind.gap is not None:
             adjacent.append(
-                f"{_radio_rival_name(car.behind)} {car.behind.gap:.2f} seconds behind")
+                f"{_radio_rival_name(car.behind, track)} "
+                f"{_spoken_gap(car.behind.gap)} behind")
 
-    spoken = bits[0]
+    # Two short sentences rather than a semicolon: the voice reads a
+    # semicolon as a comma and runs the place into the first rival's name.
+    spoken = bits[0] + "."
     if adjacent:
-        spoken += "; " + ", ".join(adjacent)
-    spoken += "."
+        spoken += " " + ", ".join(adjacent) + "."
     return _yes(
         spoken,
         position=car.position,
         class_position=car.class_position,
         ahead=(None if car.ahead is None else {
-            "driver": _radio_rival_name(car.ahead), "gap_seconds": car.ahead.gap}),
+            "driver": _radio_rival_name(car.ahead, track),
+            "gap_seconds": car.ahead.gap}),
         behind=(None if car.behind is None else {
-            "driver": _radio_rival_name(car.behind), "gap_seconds": car.behind.gap}),
+            "driver": _radio_rival_name(car.behind, track),
+            "gap_seconds": car.behind.gap}),
         basis="live position plus physical adjacent-car gaps; not gap to leader",
     )
 
@@ -1280,7 +1391,7 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
     gap_seconds = rival.gap
     gap_metres = rival.gap_metres
     if gap_seconds is not None:
-        gap_words = f"{gap_seconds:.2f} seconds"
+        gap_words = _spoken_gap(gap_seconds)
     elif gap_metres is not None:
         if getattr(car, "units", "metric") == "imperial":
             gap_words = f"{gap_metres * 3.28084:.0f} feet"
@@ -1289,19 +1400,19 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
     else:
         return _no(f"I've got the car {direction}, but no live gap to it.")
 
-    who = _radio_rival_name(rival)
+    who = _radio_rival_name(rival, track)
     where = "ahead" if direction == "ahead" else "behind"
     context = _class_context(track, rival)
 
     if status in ("unavailable", "waiting"):
-        spoken = f"{who} is {gap_words} {where}; no closing trend yet."
+        spoken = f"{who} is {gap_words} {where}, too early to call a trend."
         return _yes(spoken, direction=direction, confidence="waiting",
                     observed_seconds=round(observed, 1), rate_metres_per_second=None,
                     gap_seconds=gap_seconds, gap_metres=gap_metres,
                     contact_seconds=None, **context)
 
     if status == "fluctuating":
-        spoken = f"The gap to {who} is fluctuating around {gap_words}; no clear trend."
+        spoken = f"The gap to {who} is moving around {gap_words}, no clear trend."
         return _yes(spoken, direction=direction, confidence=status,
                     observed_seconds=round(observed, 1), rate_metres_per_second=None,
                     gap_seconds=gap_seconds, gap_metres=gap_metres,
@@ -1316,7 +1427,7 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
                     contact_seconds=None, **context)
 
     if change is None:
-        spoken = f"The gap to {who} is fluctuating around {gap_words}; no clear trend."
+        spoken = f"The gap to {who} is moving around {gap_words}, no clear trend."
         return _yes(spoken, direction=direction, confidence="fluctuating",
                     observed_seconds=round(observed, 1), rate_metres_per_second=None,
                     gap_change_seconds=None, mini_sectors=segments,
@@ -1331,7 +1442,7 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
         else:
             movement = (f"{who} is gaining right now" if closing
                         else f"You're edging away from {who} right now")
-        spoken = f"{movement}; gap {gap_words}."
+        spoken = f"{movement}, gap's {gap_words}."
     else:
         delta_words = _spoken_delta(abs(change))
         if direction == "ahead":
@@ -1340,8 +1451,9 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
         else:
             movement = (f"{who} is gaining" if closing
                         else f"You're pulling away from {who}")
-        spoken = (f"{movement}, {delta_words} over the last {segments} "
-                  f"mini-sectors; gap {gap_words}.")
+        # "Over the last 3 mini-sectors" is how the measurement works, not
+        # how an engineer talks; the window is short and recent, so say so.
+        spoken = f"{movement}, {delta_words} just now. Gap's {gap_words}."
 
     return _yes(
         spoken,

@@ -8,6 +8,7 @@ invent a number" rule.
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import car_names, race_math
+from .config import _DEFAULT_CONFIG
 from .telemetry import CarTelemetry, TelemetrySnapshot, TrackConfig, session_kind
 from .text import question_words
 
@@ -19,6 +20,39 @@ from .text import question_words
 VALIDATION_PROMPT = (
     "Your reply is spoken aloud over team radio: one sentence, no markdown, "
     "no lists, no headings."
+)
+
+# The rules that stop the engineer inventing anything. They lived in the
+# editable System Prompt box, which reads like a personality setting and is
+# the first thing a driver rewrites: cleared and saved, the model was left
+# with no rule against making things up at all. Fixed here, they apply
+# whatever the box says. Moved word for word from the old default.
+HONESTY_PROMPT = (
+    "EVERY fact you state must come from the telemetry you are given — not just "
+    "numbers. Corner names, track layout, what a rival is doing, their tyres or "
+    "fuel or strategy, weather that has not happened yet, and anything earlier in "
+    "the session are all things you do NOT know unless the block says so. Never "
+    "name a corner or describe a part of the track. If you were not given it, you "
+    "do not have it: say so and stop. A confident wrong answer is worse than none, "
+    "because the driver cannot check you at speed.\n\n"
+    "Ground every number in the telemetry you are given. Where a value reads "
+    "\"unknown\" the car is not sending it — say plainly that you don't have that "
+    "reading, without using the word \"unknown\". Never estimate a missing value or "
+    "reuse one from an earlier answer. Judgement and recommendations are your job; "
+    "inventing data is not.\n\n"
+    "You have not watched the race: you see the numbers in front of you and nothing"
+    " else — no replay, no memory of earlier laps, no idea what happened at any "
+    "corner. So never narrate the race. Never say who they held off, who was "
+    "struggling, where they lost it, or what a mistake cost them, unless the "
+    "telemetry says so outright. Asked what went wrong, say honestly that you would"
+    " need to look at the data.\n\n"
+    "When you have to refuse, refuse in character. You are a race engineer on a pit"
+    " wall, not a program reporting a missing field. Never mention the sim, the "
+    "game, telemetry channels, sensors, data feeds, tools or calculations — the "
+    "driver does not know those exist and hearing about them breaks the race. Say "
+    "\"I've got no reading on your brakes\", \"nothing on that from here\", or \"I can't"
+    " see that one\", then stop. A refusal is one short line, never an explanation "
+    "of why the data is missing."
 )
 
 # Also appended after the editable persona, for the same reason: a call the
@@ -112,7 +146,11 @@ class PromptBuilder:
         tools_enabled: bool = False,
     ) -> List[Dict[str, str]]:
         """System + recent turns + the current question with telemetry."""
-        system = f"{self.config.system_prompt}\n\n{VALIDATION_PROMPT}\n\n{ADVICE_PROMPT}"
+        # A blank box means "the default", never "no persona at all".
+        persona = (str(self.config.system_prompt or "").strip()
+                   or _DEFAULT_CONFIG["system_prompt"])
+        system = (f"{persona}\n\n{HONESTY_PROMPT}\n\n{VALIDATION_PROMPT}"
+                  f"\n\n{ADVICE_PROMPT}")
         if tools_enabled:
             system += f"\n\n{TOOLS_PROMPT}"
         if telemetry is not None and getattr(telemetry.track, "finished", False):
@@ -267,16 +305,18 @@ class PromptBuilder:
                 _fuel_line(car),
                 f"- {_neighbour_label(track, 'Ahead', car.ahead)}: {_rival(car.ahead, car, track)}",
                 f"- {_neighbour_label(track, 'Behind', car.behind)}: {_rival(car.behind, car, track)}",
-                f"- Fastest lap of the session: {_fastest(track.fastest_lap)}",
+                f"- Fastest lap of the session: "
+                f"{_fastest(track.fastest_lap, _lap_digits(track))}",
                 _field_strength(track),
                 f"- Running order ({track.field_size} cars, {_gap_meaning(track)}):"
                 f" {_field(track.field)}",
                 f"- Stint: {car.stint_laps} laps | Lap progress: {car.lap_progress * 100:.0f}%",
                 f"- Pace: {_delta_line(car, track)}",
                 f"- Strategy: {_strategy_line(car)}",
-                f"- Best lap: {_laptime(car.best_lap_time)}"
-                f" | Last lap: {_laptime(car.last_lap_time)}"
-                f" | This lap so far: {_laptime(car.current_lap_time)}",
+                f"- Best lap: {_laptime(car.best_lap_time, _lap_digits(track))}"
+                f" | Last lap: {_laptime(car.last_lap_time, _lap_digits(track))}"
+                f" | This lap so far: "
+                f"{_laptime(car.current_lap_time, _lap_digits(track))}",
                 _weather(car),
             ]
             + _fixed_setup(track)
@@ -372,7 +412,11 @@ def _rival(rival, car=None, track=None) -> str:
         who += f" [{', '.join(identity)}]"
     parts = []
     if rival.gap is not None:
-        parts.append(f"{rival.gap:.2f} seconds")
+        # A tenth, as the prompt asks the model to speak it. Handed
+        # hundredths, the model read them out — "one point nine eight" — and
+        # nothing it decides needs them: the trend lines below carry the
+        # finer movement, worked out in Python.
+        parts.append(f"{rival.gap:.1f} seconds")
     if rival.gap_metres is not None:
         parts.append(_distance(car, rival.gap_metres))
     where = getattr(rival, "track_surface", "")
@@ -393,7 +437,8 @@ def _delta_line(car, track) -> str:
     if car.delta_to_best is not None:
         bits.append(f"{_signed(car.delta_to_best)} vs your best (minus = faster)")
     if car.avg_lap_time is not None:
-        bits.append(f"rolling average lap {_laptime(car.avg_lap_time)}")
+        bits.append(f"rolling average lap "
+                    f"{_laptime(car.avg_lap_time, _lap_digits(track))}")
     if car.delta_to_session_best is not None:
         bits.append(f"{_signed(car.delta_to_session_best)} vs session best")
     ahead_status = getattr(car, "closing_ahead_status", "waiting")
@@ -569,13 +614,21 @@ def _driver(track, callsign: str = "") -> str:
     driver actually asks, but it is never volunteered.
     """
     name = getattr(track, "driver_name", "") or ""
+    # Said on every turn, "use their name now and then" was read as an
+    # invitation each time, and the model cannot remember how often it has
+    # already accepted: the name was in a third of answers, measured. Told
+    # flatly not to, it said the name and then took it back on air — "Bart...
+    # no, I'll leave the name out". So during the session this line only says
+    # who it is, and `llm._drop_vocative` takes the name back out of the
+    # answer. After the flag the debrief wants it, and gets it.
+    usage = " — use their name." if getattr(track, "finished", False) else "."
     if callsign:
         line = f"- You are talking to {callsign}"
         if name and name.lower() != callsign.lower():
             line += (f". Call them {callsign} and nothing else. Their full name "
                      f"is {name} — say it only if they ask for it directly, "
                      f"never in passing")
-        return line + "."
+        return line + usage
     if not name:
         return ""
     bits = [f"- You are talking to {name}"]
@@ -588,7 +641,7 @@ def _driver(track, callsign: str = "") -> str:
     team = getattr(track, "team_name", "") or ""
     if team and team != name:
         bits.append(f"for {team}")
-    return ", ".join(bits) + " — use their name now and then, not in every call."
+    return ", ".join(bits) + usage
 
 
 def _car_identity(track) -> str:
@@ -630,7 +683,7 @@ def _result(car, track, callsign: str = "") -> str:
     if track.field_size:
         bits.append(f"out of {track.field_size} cars")
     if car.best_lap_time:
-        bits.append(f"best lap {_laptime(car.best_lap_time)}")
+        bits.append(f"best lap {_laptime(car.best_lap_time, _lap_digits(track))}")
         fastest = track.fastest_lap
         if fastest is not None and fastest.known and fastest.best_lap:
             delta = car.best_lap_time - fastest.best_lap
@@ -641,7 +694,8 @@ def _result(car, track, callsign: str = "") -> str:
                 holder = fastest.name or f"car {fastest.car_number}"
                 bits.append(
                     f"{race_math._spoken_delta(delta)} off the fastest lap of the {whose} "
-                    f"({holder}, {_laptime(fastest.best_lap)}) — use this figure, do not "
+                    f"({holder}, {_laptime(fastest.best_lap, _lap_digits(track))}) — "
+                    f"use this figure, do not "
                     f"work the difference out yourself"
                 )
     if car.incidents is not None:
@@ -1064,11 +1118,11 @@ def _field_strength(track) -> str:
               "never predict a race result from it.")
 
 
-def _fastest(rival) -> str:
+def _fastest(rival, digits: int = 3) -> str:
     """Whoever holds the session's best lap."""
     if rival is None or not rival.known:
         return UNKNOWN
-    return f"{rival.describe()} on {_laptime(rival.best_lap)}"
+    return f"{rival.describe()} on {_laptime(rival.best_lap, digits)}"
 
 
 def _field(field) -> str:
@@ -1294,20 +1348,35 @@ def _num(value, places: int = 1) -> str:
     return UNKNOWN if value is None else f"{value:.{places}f}"
 
 
-def _laptime(value) -> str:
+def _laptime(value, digits: int = 3) -> str:
     """Lap times as minutes:seconds.
 
     iRacing sends raw seconds (112.188). Passing that through made the model
     do the mm:ss conversion itself, and it got it wrong — 112.188 came back
     as "1:12.188" instead of 1:52.188. Doing the arithmetic here removes the
     chance to fumble it.
+
+    Rounded before splitting, so 91.96 to a tenth is 1:32.0, not 1:31.10.
     """
     if value is None:
         return UNKNOWN
+    value = round(float(value), digits)
     if value < 60:
-        return f"{value:.3f}s"
-    minutes, seconds = divmod(float(value), 60)
-    return f"{int(minutes)}:{seconds:06.3f}"
+        return f"{value:.{digits}f}s"
+    minutes, seconds = divmod(value, 60)
+    width = 3 + digits
+    return f"{int(minutes)}:{seconds:0{width}.{digits}f}"
+
+
+def _lap_digits(track) -> int:
+    """How precisely to give the model a lap time in this session.
+
+    Thousandths were read aloud — "one thirty-one point five one five". In a
+    race a tenth is what an engineer says. In qualifying and practice the
+    hundredths are the difference between two drivers, so they stay; the
+    thousandths never helped anyone at speed.
+    """
+    return 1 if session_kind(getattr(track, "session_type", "")) == "race" else 2
 
 
 def _of(total) -> str:

@@ -6,6 +6,26 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+### Changed
+
+- The engineer talks like one on the answers it gives straight from its own
+  calculations: fuel, position, gaps, pit window, status and the car's
+  resources. Gaps are said to the tenth ("a second and a half", not "one
+  point five one seconds"), rivals by surname ("Rossi", not "M. Rossi"), and
+  a healthy tank is a verdict and one margin ("Fuel's fine to the end, a lap
+  and a half spare") instead of four figures, two of them the same fact in
+  different units. Ask "how much fuel" and the litres are still there. Fuel
+  margins only ever round down, and a shortfall keeps its exact figures.
+- The engineer no longer calls you by name in the middle of a session. It
+  did in a third of answers, measured; it is kept for the debrief.
+- Lap times are given to the tenth in a race and to the hundredth in
+  practice and qualifying, never to the thousandth.
+- The rules that stop the engineer inventing anything are no longer part of
+  the System Prompt box, where clearing or rewriting it switched them off.
+  They are always added. A blank box now means the default prompt, and
+  **Restore default prompt** brings back the shipped one. The default is
+  half its old length, with rules the app already enforces taken out.
+
 ### Added
 
 - Warnings and errors are written to `aire.log` beside `config.json`.
@@ -16,6 +36,9 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- An answer could be spoken with the model's own draft and its correction
+  in it — "Wait, I need to keep that to one sentence" — read out between two
+  versions of the answer. Only the final one is spoken now.
 - `AIRE.exe --server` never started. It exited at once with nothing
   logged, because the build has no console and the web server asked the
   console whether it could show colours. Desktop mode had the same flaw

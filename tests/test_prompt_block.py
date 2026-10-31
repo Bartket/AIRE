@@ -331,3 +331,91 @@ def test_the_model_is_handed_a_verdict_on_the_car_not_a_dozen_readings():
         TelemetrySnapshot(_car(warnings=["oil pressure warning"]), track),
         tools_enabled=True)
     assert "Car check: NEEDS ATTENTION — Oil pressure warning." in hurt
+
+
+# ── The editable prompt, and what is added whatever it says ─────────────
+
+def _system(prompt, telemetry=None):
+    from ai_race_engineer.config import AppConfig
+
+    return PromptBuilder(AppConfig({"system_prompt": prompt})).build_messages(
+        "How's my fuel?", telemetry)[0]["content"]
+
+
+def test_a_cleared_prompt_box_still_forbids_inventing_anything():
+    """The rules against making things up lived only in the editable box.
+
+    It reads like a personality setting, so it is the one a driver rewrites:
+    cleared and saved, the model was left 146 words with no rule against
+    inventing a number or a corner — and "Restore every setting" did not
+    bring it back.
+    """
+    from ai_race_engineer.config import _DEFAULT_CONFIG
+
+    system = _system("")
+
+    assert "EVERY fact you state must come from the telemetry" in system
+    assert _DEFAULT_CONFIG["system_prompt"] in system, "blank should mean the default"
+
+
+def test_a_rewritten_persona_keeps_the_honesty_rules():
+    system = _system("You are a cheerful engineer. Be brief.")
+
+    assert "You are a cheerful engineer" in system
+    assert "Never estimate a missing value" in system
+    assert "refuse in character" in system
+
+
+def test_the_prompt_box_can_be_put_back_from_the_panel(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from ai_race_engineer.config import AppConfig, _DEFAULT_CONFIG
+    from ai_race_engineer.web_ui import create_app
+
+    config = AppConfig({"telemetry": {"source": "simulated"},
+                        "system_prompt": "Shout everything."},
+                       path=tmp_path / "config.json")
+    client = TestClient(create_app(config), base_url="http://127.0.0.1:9420")
+
+    assert client.post("/api/config/reset/system_prompt").status_code == 200
+    assert config.system_prompt == _DEFAULT_CONFIG["system_prompt"]
+
+
+# ── The driver's name ───────────────────────────────────────────────────
+
+def test_the_name_is_not_an_invitation_while_the_session_runs():
+    """"Use their name now and then", on every turn, put it in a third of
+    answers — measured, 16 of 45. The model cannot remember how often it has
+    already said it, so each turn read as permission."""
+    from ai_race_engineer.prompt_builder import _driver
+
+    running = _driver(TrackConfig(session_type="Race", driver_name="Bart Kowal"))
+    finished = _driver(TrackConfig(session_type="Race", driver_name="Bart Kowal",
+                                   finished=True))
+
+    assert "Bart Kowal" in running
+    # Neutral, not a prohibition: told flatly not to, the model said the name
+    # and retracted it on air. The answer is cleaned in code instead.
+    assert "use their name" not in running and "now and then" not in running
+    assert "use their name" in finished
+
+
+# ── Lap times ───────────────────────────────────────────────────────────
+
+def test_a_race_lap_time_is_given_to_the_tenth():
+    """Thousandths were read aloud: "one thirty-one point five one five"."""
+    block = PromptBuilder.format_telemetry(
+        _car(best_lap_time=91.2, last_lap_time=91.515),
+        TrackConfig(session_type="Race"))
+
+    assert "Last lap: 1:31.5 " in block
+    assert "1:31.515" not in block
+
+
+def test_a_qualifying_lap_time_keeps_its_hundredths():
+    """Rounded to a tenth, a driver 0.04 off pole and pole read the same."""
+    block = PromptBuilder.format_telemetry(
+        _car(best_lap_time=91.2, last_lap_time=91.515),
+        TrackConfig(session_type="Lone Qualify"))
+
+    assert "Last lap: 1:31.52 " in block

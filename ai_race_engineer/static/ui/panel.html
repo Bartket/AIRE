@@ -225,6 +225,13 @@
                 <div class="form-group">
                     <label>System Prompt:</label>
                     <textarea v-model="config.system_prompt" rows="8"></textarea>
+                    <p class="hint">
+                        How the engineer sounds. The rules that stop it inventing anything are
+                        always added, whatever this says. Leave it blank for the default.
+                    </p>
+                    <button class="btn btn-secondary" @click="resetSection('system_prompt')">
+                        Restore default prompt
+                    </button>
                 </div>
             </section>
 

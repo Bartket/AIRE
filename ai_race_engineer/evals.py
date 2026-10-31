@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -91,6 +92,13 @@ def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[s
     finished = bool(snapshot.get("finished"))
     if not finished and len(spoken.split()) > 45:
         failures.append("race-speed answer exceeds 45 words")
+    # What made the radio sound read off a spreadsheet: a time said to the
+    # hundredth ("1.51 seconds"), and a rival named the way the roster
+    # abbreviates them ("M. Rossi"). Neither helps a driver at speed.
+    if not finished and re.search(r"\b\d+\.\d{2,}\s*seconds\b", spoken):
+        failures.append("race-speed answer gives a time to the hundredth")
+    if re.search(r"\b[A-Z]\. [A-Z][a-z]", spoken):
+        failures.append("rival named by initial instead of surname")
     return failures
 
 
