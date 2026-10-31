@@ -142,7 +142,7 @@ class PromptBuilder:
         self,
         question: str,
         telemetry: Optional[TelemetrySnapshot] = None,
-        history: Iterable[Tuple[str, str]] = (),
+        history: Iterable[Tuple] = (),
         tools_enabled: bool = False,
     ) -> List[Dict[str, str]]:
         """System + recent turns + the current question with telemetry."""
@@ -157,8 +157,11 @@ class PromptBuilder:
             system += f"\n\n{DEBRIEF_PROMPT}"
         messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
-        for prev_q, prev_a in history:
-            messages.append({"role": "user", "content": prev_q})
+        now = getattr(getattr(telemetry, "track", None), "current_lap", None)
+        for prev in history:
+            prev_q, prev_a = prev[0], prev[1]
+            asked = prev[2] if len(prev) > 2 else None
+            messages.append({"role": "user", "content": _aged(prev_q, asked, now)})
             messages.append({"role": "assistant", "content": prev_a})
 
         messages.append({
@@ -1377,6 +1380,23 @@ def _lap_digits(track) -> int:
     """How precisely to give the model a lap time: `race_math.lap_digits`,
     one rule for the block and the calculators."""
     return race_math.lap_digits(track)
+
+
+def _aged(question: str, asked_lap, now_lap) -> str:
+    """An earlier question, marked with how long ago it was asked.
+
+    Replayed history carried its numbers with no age, in the model's own
+    voice: "Rossi is 1.2 seconds ahead" from three laps back read like a
+    current figure, and only a prompt rule said not to reuse it. The age
+    goes on the question, not the answer — a replayed answer is the model's
+    own example to copy, and a bracketed tag there would end up on air.
+    """
+    if asked_lap is None or now_lap is None or now_lap < asked_lap:
+        return question
+    laps = now_lap - asked_lap
+    age = ("this lap" if laps == 0
+           else "1 lap ago" if laps == 1 else f"{laps} laps ago")
+    return f"[{age}] {question}"
 
 
 def _of(total) -> str:

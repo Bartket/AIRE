@@ -447,3 +447,29 @@ def test_race_control_is_reachable_from_any_phrasing_and_spoken_as_written():
 
     assert answer == "Drive-through for speeding in the pit lane."
     assert client.last_route == "tool:race_control_report"
+
+
+def test_a_replayed_answer_says_how_old_it_is():
+    """History came back with no age: "Rossi is 1.2 seconds ahead" from three
+    laps ago sat in context in the model's own voice, looking current, and
+    only a prompt rule said not to reuse it. The age goes on the question —
+    a replayed answer is an example the model copies, so it stays as said."""
+    snapshot = _leader_snapshot()
+    snapshot.track.current_lap = 10
+    client = _scripted([
+        {"finish_reason": "stop", "message": {"content": "Rossi is a second up the road."}},
+        {"finish_reason": "stop", "message": {"content": "Copy."}},
+    ])
+    sent = []
+    post = client._client.post
+    client._client.post = lambda url, json=None, **kw: (sent.append(json), post(url, json=json, **kw))[1]
+    client._tools_unsupported = True
+
+    client.generate("Who's in front?", snapshot)
+    snapshot.track.current_lap = 13
+    client.generate("And now?", snapshot)
+
+    messages = sent[-1]["messages"]
+    assert messages[1] == {"role": "user", "content": "[3 laps ago] Who's in front?"}
+    assert messages[2] == {"role": "assistant", "content": "Rossi is a second up the road."}
+    assert "[" not in messages[-1]["content"].split("Question:")[-1]

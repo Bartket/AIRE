@@ -217,8 +217,9 @@ class LLMClient:
         self._prompts = prompt_builder or PromptBuilder(config)
         self._reasoning_effort = reasoning_effort
         self._client = httpx.Client(timeout=30.0)
-        # (question, answer) pairs replayed as context on later questions.
-        self._history: Deque[Tuple[str, str]] = deque(maxlen=16)
+        # (question, answer, lap it was asked on) replayed as context on later
+        # questions, so the prompt can say how old each answer is.
+        self._history: Deque[Tuple[str, str, Optional[int]]] = deque(maxlen=16)
         # Set once a provider proves it cannot handle tools, so we stop asking.
         self._tools_unsupported = False
         # Set once a model proves it thinks before speaking, so later
@@ -280,7 +281,7 @@ class LLMClient:
         if direct:
             self._last_route = "deterministic"
             text = _clean_response(direct)
-            self._history.append((question, text))
+            self._history.append((question, text, _current_lap(telemetry)))
             logger.info("Deterministic telemetry answer: %r", text)
             return text
 
@@ -314,7 +315,7 @@ class LLMClient:
             logger.error("Model %s returned an empty reply", self.model)
             return NO_ANSWER
 
-        self._history.append((question, text))
+        self._history.append((question, text, _current_lap(telemetry)))
         return text
 
     def _driver_names(self, telemetry: Optional[TelemetrySnapshot]) -> List[str]:
@@ -696,6 +697,10 @@ If the requested tyre type is not in that list, use ambiguous."""
 
     def close(self) -> None:
         self._client.close()
+
+
+def _current_lap(telemetry: Optional[TelemetrySnapshot]) -> Optional[int]:
+    return getattr(getattr(telemetry, "track", None), "current_lap", None)
 
 
 def _thought_past_the_budget(choice: Dict[str, Any],

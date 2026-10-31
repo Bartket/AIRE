@@ -129,8 +129,17 @@ should be green between items.
 
 - [ ] **17 · F6 — report deterministic-route coverage from the corpus**
 - [ ] **18 · F6 — filler-stripping + alias table in front of the exact-match router** (no model, no embeddings)
-- [ ] **19 · F6 — decide `race_control_report`:** add a tool schema or document why it is deterministic-only
-- [ ] **20 · F8 — age-stamp replayed history turns**
+- [x] **19 · F6 — decide `race_control_report`:** add a tool schema or document why it is deterministic-only
+  *Done:* a tool schema, and terminal like the other verbatim calculators. Live,
+  the model picked it for all six investigation/penalty phrasings tried; its
+  bare "Green flag." then left "did I get a penalty" unanswered, so a clean flag
+  now says "no penalty showing" (read from the same SessionFlags bits).
+- [x] **20 · F8 — age-stamp replayed history turns**
+  *Done:* each exchange keeps the lap it was asked on; the replayed *question*
+  carries `[3 laps ago]`, the replayed answer is left exactly as said, because
+  a tag on the model's own example is a tag it would copy onto the radio.
+  Live, 5 three-question conversations: no tag imitated in 15 answers, and the
+  follow-up re-called `gap_to` every time instead of reusing the old figure.
 
 ## Then — proactive calls (not started)
 

@@ -40,6 +40,10 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   model now gets every figure rounded the way it should be said. Practice
   and qualifying keep their hundredths. A sentence and its own figures now
   round the same way, so "9 tenths" is never stored as 0.8.
+- Earlier questions replayed to the model now say how long ago they were
+  asked ("3 laps ago"). An old answer's figures used to sit in the
+  conversation looking current, and only an instruction said not to reuse
+  them.
 - Natural-language pit commands ask the model for a fixed reply shape on
   OpenRouter instead of relying on temperature 0. Claude Haiku 5.5 does not
   take a temperature, and OpenRouter dropped it without saying so. The reply
