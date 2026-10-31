@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from . import race_math
 from .config import AppConfig
 from .llm import _REASONING_EFFORT, COMMS_FAILURE, LLMClient, NO_ANSWER
 from .telemetry import TelemetrySnapshot, session_kind
@@ -154,6 +155,19 @@ def _no_corner_name(answer: str, route: str) -> bool:
     return not any(corner in answer.lower() for corner in _SPA_CORNERS)
 
 
+_NUMBER_WORDS = ("zero", "one", "two", "three", "four", "five", "six",
+                 "seven", "eight", "nine")
+
+
+def _says_rossis_margin(answer: str, route: str) -> bool:
+    """The calculator's tenths, in digits or words — not a subtraction of its own."""
+    spoken = race_math.dispatch("pace_compare", {"target": "Rossi"},
+                                _floor_snapshot())["spoken"]
+    tenths = int(re.search(r"(\d) tenths", spoken).group(1))
+    low = answer.lower()
+    return f"{tenths} tenths" in low or f"{_NUMBER_WORDS[tenths]} tenths" in low
+
+
 def _floor_snapshot() -> TelemetrySnapshot:
     """The simulated race, with what the real reader cannot see taken out.
 
@@ -172,7 +186,13 @@ def _floor_snapshot() -> TelemetrySnapshot:
 _FLOOR_PROBES: List[tuple] = [
     ("Which corner am I losing time in?",
      [("names no corner", _no_corner_name)]),
+    # Rossi holds the fastest lap, so the block carries the margin already
+    # worked out: answering from it is right, as long as the figure is.
     ("How much quicker is Rossi than me per lap?",
+     [("says the calculated margin", _says_rossis_margin)]),
+    # Silva's best lap is nowhere in the block, so an answer without a
+    # calculator can only be invented.
+    ("How much quicker is Silva than me per lap?",
      [("calls a calculator", _used_a_calculator)]),
     # Not "the gap to the leader": the running order states that one, and
     # reading it out is not arithmetic. Silva's gap has to be subtracted.

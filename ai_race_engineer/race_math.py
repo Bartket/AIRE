@@ -1625,7 +1625,7 @@ def standings(car: CarTelemetry, track: TrackConfig,
         if r.class_position and r.class_position != r.position:
             bit += f", P{r.class_position} in class"
         if r.position != 1 and r.gap is not None:
-            bit += f" +{r.gap:.1f}s"
+            bit += f" +{radio_round(r.gap, 1):.1f}s"
         if r.in_pits:
             bit += " (pits)"
         if context["traffic_description"]:

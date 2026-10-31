@@ -40,6 +40,11 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   model now gets every figure rounded the way it should be said. Practice
   and qualifying keep their hundredths. A sentence and its own figures now
   round the same way, so "9 tenths" is never stored as 0.8.
+- The telemetry the model reads now gives how far your best lap is off the
+  session's fastest, worked out, instead of two lap times to subtract. Asked
+  how much quicker the fastest car was, the model sometimes did the
+  subtraction itself and got it wrong ("point eight" for nine tenths). Gaps
+  in it are rounded exactly as the engineer's calculators round them.
 - Earlier questions replayed to the model now say how long ago they were
   asked ("3 laps ago"). An old answer's figures used to sit in the
   conversation looking current, and only an instruction said not to reuse

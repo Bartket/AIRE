@@ -419,3 +419,44 @@ def test_a_qualifying_lap_time_keeps_its_hundredths():
         TrackConfig(session_type="Lone Qualify"))
 
     assert "Last lap: 1:31.52 " in block
+
+
+def _block(car, track, question="How's it going?"):
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    return PromptBuilder(AppConfig()).build_messages(
+        question, TelemetrySnapshot(car, track), [], tools_enabled=True)[-1]["content"]
+
+
+def test_the_fastest_lap_line_does_the_subtraction_itself():
+    """Given two lap times and nothing between them, the model skipped the
+    calculator and subtracted: "about point eight quicker", for a 0.85 the
+    calculator says as nine tenths. The difference is in the line now."""
+    from ai_race_engineer.telemetry import Rival
+
+    rossi = Rival(name="Rossi", car_number="13", position=1, best_lap=90.35)
+    car = CarTelemetry(position=4, best_lap_time=91.2)
+    line = next(l for l in _block(car, TrackConfig(session_type="Race", fastest_lap=rossi),
+                                  "How much quicker is Rossi than me per lap?").splitlines()
+                if "Fastest lap" in l)
+    assert "9 tenths of a second off it" in line
+    assert "never work the difference out yourself" in line
+
+    mine = CarTelemetry(position=1, best_lap_time=90.35)
+    line = next(l for l in _block(mine, TrackConfig(session_type="Race", fastest_lap=rossi)).splitlines()
+                if "Fastest lap" in l)
+    assert "that's your lap" in line
+
+
+def test_the_block_and_a_tool_give_one_gap_one_value():
+    """4.35 in binary is 4.3499…: formatted plainly the block said 4.3 while
+    gap_to, rounding half up, said 4.4 — the same gap, two figures."""
+    from ai_race_engineer import race_math
+    from ai_race_engineer.telemetry import Rival
+
+    ahead = Rival(name="Silva", car_number="16", position=3, gap=4.35)
+    block = _block(CarTelemetry(position=4, ahead=ahead),
+                   TrackConfig(session_type="Race", field=[ahead]))
+    assert "Silva (car 16) — 4.4 seconds" in block
+    assert race_math._spoken_gap(4.35) == "4.4 seconds"

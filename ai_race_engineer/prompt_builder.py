@@ -309,7 +309,8 @@ class PromptBuilder:
                 f"- {_neighbour_label(track, 'Ahead', car.ahead)}: {_rival(car.ahead, car, track)}",
                 f"- {_neighbour_label(track, 'Behind', car.behind)}: {_rival(car.behind, car, track)}",
                 f"- Fastest lap of the session: "
-                f"{_fastest(track.fastest_lap, _lap_digits(track))}",
+                f"{_fastest(track.fastest_lap, _lap_digits(track))}"
+                f"{_off_fastest(car, track)}",
                 _field_strength(track),
                 f"- Running order ({track.field_size} cars, {_gap_meaning(track)}):"
                 f" {_field(track.field)}",
@@ -419,7 +420,7 @@ def _rival(rival, car=None, track=None) -> str:
         # hundredths, the model read them out — "one point nine eight" — and
         # nothing it decides needs them: the trend lines below carry the
         # finer movement, worked out in Python.
-        parts.append(f"{rival.gap:.1f} seconds")
+        parts.append(f"{race_math.radio_round(rival.gap, 1):.1f} seconds")
     if rival.gap_metres is not None:
         parts.append(_distance(car, rival.gap_metres))
     where = getattr(rival, "track_surface", "")
@@ -1128,6 +1129,26 @@ def _fastest(rival, digits: int = 3) -> str:
     return f"{rival.describe()} on {_laptime(rival.best_lap, digits)}"
 
 
+def _off_fastest(car, track) -> str:
+    """How far the driver's best is off the session's fastest, worked out here.
+
+    The line used to give two lap times and leave the gap between them to
+    the model. Asked "how much quicker is Rossi", it skipped the calculator
+    and subtracted them itself — "about point eight", for 0.85 that the
+    calculator says as nine tenths. The debrief line already carried the
+    difference; this is the same figure, live.
+    """
+    fastest = track.fastest_lap
+    mine = car.best_lap_time
+    if not mine or fastest is None or not fastest.known or not fastest.best_lap:
+        return ""
+    delta = mine - fastest.best_lap
+    if delta <= 0.001:
+        return " — that's your lap"
+    return (f" — your best is {race_math._spoken_delta(delta, _lap_digits(track))}"
+            f" off it; use this figure, never work the difference out yourself")
+
+
 def _field(field) -> str:
     """Compact classified order, so the engineer can talk about the whole
     field rather than only the two cars either side."""
@@ -1144,7 +1165,7 @@ def _field(field) -> str:
         if multiclass and getattr(r, "car_class_name", ""):
             bits.append(f"[{r.car_class_name} class]")
         if r.position != 1 and r.gap:
-            bits.append(f"+{r.gap:.1f}s")
+            bits.append(f"+{race_math.radio_round(r.gap, 1):.1f}s")
         if r.laps_down < 0:
             bits.append(f"{-r.laps_down} lap(s) up")
         elif r.laps_down > 0:
