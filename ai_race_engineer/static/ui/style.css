@@ -934,7 +934,7 @@ input[type="range"]:focus-visible {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm) var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
   margin-bottom: var(--spacing-lg);
   background: var(--surface);
@@ -944,17 +944,102 @@ input[type="range"]:focus-visible {
   color: var(--text-muted);
 }
 
+/* One colour per meaning, shared by the engine badge and the pills: green
+   works, amber wants setting up, red is broken, grey is deliberate, blue is
+   the engineer talking. Red used to cover "no key entered yet" too, so a
+   first run looked like five failures. */
+.status-bar .ok    { --level: var(--success); }
+.status-bar .setup { --level: var(--warning); }
+.status-bar .bad   { --level: var(--danger); }
+.status-bar .idle  { --level: var(--text-faint); }
+.status-bar .info  { --level: var(--info); }
+
 .status-dot {
   display: inline-block;
-  width: 9px;
-  height: 9px;
-  margin-right: 6px;
+  flex: none;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--text-faint);
+  background: var(--level, var(--text-faint));
 }
 
-.status-dot.on { background: var(--success); }
-.status-dot.off { background: var(--danger); }
+.status-dot.pulse {
+  animation: status-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.pulse { animation: none; }
+}
+
+/* What the engineer is doing right now — the one thing worth reading at a
+   glance, so it is larger and tinted rather than another pill. */
+.engine-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  background: color-mix(in srgb, var(--level) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--level) 40%, transparent);
+}
+
+.engine-state .status-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.status-checks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--spacing-xs) var(--spacing-sm);
+  margin-left: auto;
+}
+
+/* A check is a button: it takes you to the tab that fixes it. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 22rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.status-pill .status-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.status-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.status-pill.setup,
+.status-pill.bad {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--level) 45%, transparent);
+}
 
 /* A form-group laid out horizontally. `.form-group` sets column
    direction, so the row direction has to be restated here. */
@@ -1291,7 +1376,6 @@ h1, h2, h3 {
    every digit the same width. */
 .range-value,
 .telemetry-grid,
-.status-bar,
 .log-time,
 input[type="number"] {
   font-variant-numeric: tabular-nums;

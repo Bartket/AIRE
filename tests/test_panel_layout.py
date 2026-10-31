@@ -276,3 +276,39 @@ def test_sections_sit_on_the_tab_their_subject_belongs_to():
     assert sections["Appearance"] == "app"
     assert sections["Pit Commands"] == "race"
     assert 'v-model="theme"' in panel.split('<h2>Appearance</h2>')[1].split("</section>")[0]
+
+
+def _js_method(name: str) -> str:
+    app = APP_JS.read_text(encoding="utf-8")
+    start = app.index(f"    {name}() {{")
+    return app[start:app.index("\n    },\n", start)]
+
+
+def test_the_status_bar_reads_what_is_running_not_what_is_saved():
+    """The status bar once said "no-hotkey" next to a key that worked: it
+    reported a startup failure recorded once, while the badge beside it read
+    the binding live. Config may hold an unsaved change, so the bar reads
+    `status` only — the push-to-talk pill above all."""
+    for method in ("engineState", "statusChecks"):
+        body = _js_method(method)
+        assert "this.status" in body, method
+        assert not re.search(r"\bconfig\??\.|\bkeyLabel\b", body), method
+    assert re.search(r"\bs\.hotkey\b(?!_)", _js_method("statusChecks"))
+
+
+def test_status_pills_take_you_to_the_tab_that_fixes_them():
+    panel = PANEL.read_text(encoding="utf-8")
+    bar = panel[panel.index('<div class="status-bar">'):panel.index("</nav>")]
+    assert re.search(r'<button[^>]*class="status-pill"[^>]*\n?[^>]*@click="selectTab\(check\.tab\)"', bar, re.S)
+
+
+def test_the_status_bar_speaks_plainly():
+    """"STT", "TTS" and "irsdk" are this codebase's words, not the driver's —
+    and STT and TTS were two red dots for one missing ElevenLabs key."""
+    panel = PANEL.read_text(encoding="utf-8")
+    bar = panel[panel.index('<div class="status-bar">'):panel.index("</nav>")]
+    texts = re.findall(r"text: [`']([^`']*)[`']", _js_method("statusChecks"))
+    labels = re.findall(r"label: '([^']*)'", _js_method("engineState"))
+    assert texts and labels
+    for shown in [bar, *texts, *labels]:
+        assert not re.search(r"\b(STT|TTS|irsdk)\b", shown), shown

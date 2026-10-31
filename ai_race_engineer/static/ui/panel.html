@@ -43,16 +43,17 @@
         <main class="settings-content" v-if="config">
             <!-- Live status -->
             <div class="status-bar">
-                <span><span class="status-dot" :class="status.running ? 'on' : 'off'"></span>{{ statusLabel }}</span>
-                <span><span class="status-dot" :class="status.llm_ready ? 'on' : 'off'"></span>{{ status.llm_provider }} · {{ status.llm_model }}</span>
-                <span><span class="status-dot" :class="status.telemetry_connected ? 'on' : 'off'"></span>telemetry: {{ status.telemetry_source }}</span>
-                <span><span class="status-dot" :class="status.stt_configured ? 'on' : 'off'"></span>STT</span>
-                <span><span class="status-dot" :class="status.tts_configured ? 'on' : 'off'"></span>TTS</span>
-                <span :title="status.hotkey_available ? status.hotkey
-                        : `${status.hotkey} — device not detected`">
-                    <span class="status-dot" :class="status.hotkey_available ? 'on' : 'off'"></span>
-                    hotkey: {{ status.hotkey }}{{ status.hotkey_available ? '' : ' (not connected)' }}
+                <span class="engine-state" :class="engineState.level" :title="engineState.title">
+                    <span class="status-dot" :class="{ pulse: engineState.pulse }"></span>{{ engineState.label }}
                 </span>
+                <div class="status-checks">
+                    <button v-for="check in statusChecks" :key="check.id" type="button"
+                            class="status-pill" :class="check.level" :title="check.title"
+                            @click="selectTab(check.tab)">
+                        <span class="status-dot" :class="{ pulse: check.pulse }"></span>
+                        <span class="status-text">{{ check.text }}</span>
+                    </button>
+                </div>
             </div>
 
             <nav class="tab-bar">

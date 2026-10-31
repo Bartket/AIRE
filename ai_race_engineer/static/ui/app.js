@@ -199,9 +199,87 @@ createApp({
       return this.activeProvider.api_key_set
         ? 'Saved — leave blank to keep' : 'sk-or-v1-…';
     },
-    statusLabel() {
-      if (!this.status.running) return 'stopped';
-      return this.status.state || 'listening';
+    // The status bar. Everything here reads `status` — what is running now —
+    // and never config, which may hold an unsaved change: a bar built from
+    // config once said "no-hotkey" next to a key that worked.
+    engineState() {
+      const s = this.status;
+      if (!s.running) {
+        return s.error
+          ? { label: 'Stopped', level: 'bad', pulse: false, title: s.error }
+          : { label: 'Stopped', level: 'idle', pulse: false, title: 'The engineer is not running.' };
+      }
+      const states = {
+        listening: { label: 'Listening', level: 'ok', pulse: false, title: 'Waiting for push-to-talk.' },
+        recording: { label: 'Recording', level: 'bad', pulse: true, title: 'Your mic is open.' },
+        thinking: { label: 'Thinking', level: 'setup', pulse: true, title: 'Working out the answer.' },
+        speaking: { label: 'Speaking', level: 'info', pulse: false, title: 'The engineer is on the radio.' },
+      };
+      return states[s.state] || states.listening;
+    },
+    statusChecks() {
+      const s = this.status;
+      const checks = [];
+
+      const model = String(s.llm_model || '');
+      checks.push(s.llm_ready
+        ? { id: 'model', text: model.split('/').pop() || 'Model', level: 'ok',
+            title: `${s.llm_provider} · ${model}`, tab: 'engineer' }
+        : { id: 'model', text: 'Add an OpenRouter key', level: 'setup',
+            title: 'The engineer needs an LLM key to answer.', tab: 'engineer' });
+
+      const why = s.telemetry_error ? ` ${s.telemetry_error}` : '';
+      if (s.telemetry_source === 'simulated') {
+        checks.push({ id: 'telemetry', text: 'Simulated telemetry', level: 'idle', tab: 'race',
+          title: (s.telemetry_requested === 'simulated'
+            ? 'Simulated telemetry selected.'
+            : 'iRacing was not found, so simulated telemetry is running.') + why });
+      } else if (s.telemetry_connected) {
+        checks.push({ id: 'telemetry', text: 'iRacing connected', level: 'ok', tab: 'race',
+          title: 'Live iRacing telemetry.' });
+      } else {
+        checks.push({ id: 'telemetry', text: 'Waiting for iRacing', level: 'setup', tab: 'race',
+          title: 'Start iRacing and get in a session.' + why });
+      }
+
+      if (s.stt_configured && s.tts_configured) {
+        checks.push({ id: 'voice', text: 'Voice ready', level: 'ok', tab: 'voice',
+          title: 'Speech recognition and the engineer’s voice are set up.' });
+      } else if (!s.stt_configured && !s.tts_configured) {
+        checks.push({ id: 'voice', text: 'Add an ElevenLabs key', level: 'setup', tab: 'voice',
+          title: 'Needed to hear you and to speak.' });
+      } else {
+        checks.push({ id: 'voice', text: 'Voice partly set up', level: 'setup', tab: 'voice',
+          title: s.stt_configured ? 'The engineer’s voice is not set up.'
+                                  : 'Speech recognition is not set up.' });
+      }
+
+      const hotkey = String(s.hotkey || '');
+      const [kind, ...rest] = hotkey.split(':');
+      const binding = rest.join(':');
+      if (s.hotkey_available === false) {
+        checks.push({ id: 'ptt', text: 'Push-to-talk not connected', level: 'bad', tab: 'input',
+          title: `${binding || hotkey} — device not detected.` });
+      } else if (!binding || binding === 'unbound') {
+        checks.push({ id: 'ptt', text: 'Bind push-to-talk', level: 'setup', tab: 'input',
+          title: 'Nothing is bound to push-to-talk yet.' });
+      } else {
+        // "<device> button <n>": the button is what you press, and a long
+        // device name cut off by the pill hid exactly that part.
+        const wheel = kind === 'controller' && binding.match(/^(.*) button (\d+)$/);
+        checks.push({ id: 'ptt', level: 'ok', tab: 'input',
+          text: `Push-to-talk: ${wheel ? `button ${wheel[2]}` : binding}`,
+          title: `${kind === 'controller' ? 'Wheel or button box' : 'Keyboard'}: ${binding}` });
+      }
+
+      if (s.pit_commands_enabled) {
+        checks.push(s.pit_command_pending
+          ? { id: 'pit', text: 'Pit command waiting for confirm', level: 'setup', pulse: true,
+              tab: 'race', title: 'Say confirm to set it, or cancel.' }
+          : { id: 'pit', text: 'Pit commands on', level: 'setup', tab: 'race',
+              title: 'Pit commands can change your next stop.' });
+      }
+      return checks;
     },
     // OpenRouter returns hundreds of models; filter against what is typed
     // and cap the list so the dropdown stays usable.
