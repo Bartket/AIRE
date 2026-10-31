@@ -8,6 +8,14 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Changed
 
+- The settings panel is quieter. Each hint is a line saying what the control
+  does, with a **More** link to the README for why; settings most drivers
+  never touch (endpoint, temperature, token budget, voice sliders, radio
+  filters, telemetry poll and traces) sit under **Advanced**. Radio effect
+  moved to Audio, the speech cache and exchange-log size to App, theme from
+  the header to App, and pit commands got their own section. Cost notes and
+  the pit-command warnings are unchanged. Two links that opened the top of
+  the README now go where they say.
 - The engineer talks like one on the answers it gives straight from its own
   calculations: fuel, position, gaps, pit window, status and the car's
   resources. Gaps are said to the tenth ("a second and a half", not "one

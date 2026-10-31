@@ -404,12 +404,17 @@ Everything is in the settings panel, grouped by tab. The same values live in
 
 | Tab | What is there |
 | --- | --- |
-| **Race** | Ask by text, telemetry source, units, fuel units, opt-in pit commands, live readout |
-| **Engineer** | LLM provider, key, model, temperature (ignored by models that do not take one, Claude Haiku 5.5 among them), tool calling, timeout, what to call you, system prompt |
-| **Voice** | ElevenLabs key, STT/TTS models, voice picker, delivery settings, speech cache, radio effect |
-| **Audio** | Input/output devices, engineer volume and boost, radio blips, Audio ducking |
+| **Race** | Ask by text, telemetry source and units, live readout, opt-in pit commands |
+| **Engineer** | LLM provider, key, model, memory, what to call you, system prompt |
+| **Voice** | ElevenLabs key, STT/TTS models, voice picker, delivery presets, hard-to-say names |
+| **Audio** | Input/output devices, radio blips, engineer volume and boost, radio effect, audio ducking |
 | **Input** | Push-to-talk mode, recording cut-off, keyboard or wheel binding |
-| **App** | Hide-to-tray behavior, defaults, process priority |
+| **App** | Theme, hide-to-tray, process priority, speech cache, exchange log size, defaults |
+
+Settings most drivers never need — the endpoint, temperature, token budget,
+voice sliders and radio filter — sit under **Advanced** in their section.
+Each hint says what a control does in a line; **More** opens the part of this
+README that says why.
 
 Config lives at `%APPDATA%\AIRE\config.json` on Windows, or
 `~/.config/AIRE/config.json` elsewhere. Point elsewhere with
