@@ -352,7 +352,8 @@ def test_llm_pit_interpreter_returns_only_validated_json(tmp_path, monkeypatch):
     orch = _orchestrator(tmp_path)
     captured = {}
 
-    def chat_raw(messages, max_tokens=None, tools=None, temperature=None):
+    def chat_raw(messages, max_tokens=None, tools=None, temperature=None,
+                 response_format=None):
         captured["messages"] = messages
         captured["temperature"] = temperature
         return {
@@ -680,3 +681,46 @@ def test_a_fuel_amount_that_rounds_to_zero_is_refused():
     # And one litre is a real request.
     assert parse_pit_command("pit stop fuel 1 litre").commands == \
         (PitCommand("fuel", 1),)
+
+
+def _classifier(provider, reply):
+    """An LLMClient on `provider` whose one reply is `reply`; records payloads."""
+    from ai_race_engineer.llm import LLMClient
+
+    sent = []
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"finish_reason": "stop",
+                                 "message": {"content": reply}}]}
+
+    client = LLMClient(AppConfig({"llm": {"provider": provider,
+                                          "openrouter": {"api_key": "x"}}}))
+    client._client.post = lambda _url, json=None, **_kw: (sent.append(json), _Response())[1]
+    return client, sent
+
+
+def test_the_classifier_asks_openrouter_for_its_schema_not_a_temperature():
+    """Claude Haiku 5.5 takes no temperature and OpenRouter drops it in
+    silence, so `temperature=0.0` was holding nothing on the default model.
+    The schema is what the provider can enforce; local servers are left out
+    because each of them reads it differently."""
+    client, sent = _classifier("openrouter", '{"kind":"not_command","command":""}')
+    assert client.interpret_pit_command("how much fuel do I need", ["Dry"]).kind \
+        == "not_command"
+    schema = sent[0]["response_format"]["json_schema"]["schema"]
+    assert schema["properties"]["kind"]["enum"] == ["command", "not_command", "ambiguous"]
+
+    local, sent = _classifier("local", '{"kind":"not_command"}')
+    local.interpret_pit_command("how much fuel do I need", ["Dry"])
+    assert "response_format" not in sent[0]
+
+
+def test_an_empty_command_from_the_strict_schema_still_fails_closed():
+    """The schema makes `command` always present, so "no command" can now
+    arrive as an empty string. It has to land where a missing one did."""
+    client, _ = _classifier("openrouter", '{"kind":"command","command":"  "}')
+    assert client.interpret_pit_command("box box", ["Dry"]).kind == "error"

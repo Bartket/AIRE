@@ -63,6 +63,26 @@ _THINKING_TOKENS = 2048
 # subtracted lap times itself. Re-measure with `evals --floor 5 --effort` before
 # setting this for another model.
 _REASONING_EFFORT: Optional[str] = None
+# The pit classifier's reply shape, enforced by the provider where it can be,
+# sent to OpenRouter only for the same reason as the reasoning setting. Strict
+# schemas need every field present, so a non-command carries an empty command.
+_PIT_COMMAND_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "pit_command",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string",
+                         "enum": ["command", "not_command", "ambiguous"]},
+                "command": {"type": "string"},
+            },
+            "required": ["kind", "command"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -354,8 +374,12 @@ If the requested tyre type is not in that list, use ambiguous."""
             {"role": "user", "content": request},
         ]
         try:
+            # The schema, not the temperature, is what holds the shape: Claude
+            # Haiku 5.5 does not accept a temperature, and OpenRouter drops it
+            # without a word. The parse below stays the fail-closed check.
             message = self._chat_raw(
-                messages, max_tokens=256, temperature=0.0)
+                messages, max_tokens=256, temperature=0.0,
+                response_format=_PIT_COMMAND_FORMAT)
         except LLMError as exc:
             logger.error("Pit-command interpretation failed: %s", exc)
             return PitCommandInterpretation("error")
@@ -375,7 +399,8 @@ If the requested tyre type is not in that list, use ambiguous."""
         kind = payload.get("kind")
         if kind == "command":
             command = payload.get("command")
-            if not isinstance(command, str) or len(command) > 300:
+            # Empty is the strict schema's stand-in for absent: still an error.
+            if not isinstance(command, str) or not command.strip() or len(command) > 300:
                 return PitCommandInterpretation("error")
             return PitCommandInterpretation(kind, command.strip())
         if kind in ("not_command", "ambiguous"):
@@ -548,6 +573,7 @@ If the requested tyre type is not in that list, use ambiguous."""
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: Optional[float] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """POST one completion and return the assistant message unchanged.
 
@@ -594,6 +620,8 @@ If the requested tyre type is not in that list, use ambiguous."""
         # does not reason.
         if settings["provider"] == PROVIDER_OPENROUTER and self._reasoning_effort:
             payload["reasoning"] = {"effort": self._reasoning_effort}
+        if settings["provider"] == PROVIDER_OPENROUTER and response_format:
+            payload["response_format"] = response_format
 
         try:
             resp = self._client.post(
@@ -638,7 +666,7 @@ If the requested tyre type is not in that list, use ambiguous."""
             self._thinks_aloud = True
             return self._chat_raw(
                 messages, max_tokens=max_tokens, tools=tools,
-                temperature=temperature)
+                temperature=temperature, response_format=response_format)
         return choices[0].get("message") or {}
 
     def _record_usage(self, usage: Any) -> None:
