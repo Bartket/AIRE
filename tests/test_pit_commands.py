@@ -478,7 +478,8 @@ def test_commands_ship_off_and_the_ui_names_the_risk(tmp_path):
     assert "<em>pit stop four tyres and 30 litres</em>" in panel
     assert "Your own phrasing" in panel
     assert "<strong>confirm</strong>" in panel
-    assert "result-bad" not in panel[panel.index('id="pit-commands"'):]
+    pit_start = panel.index('id="pit-commands"')
+    assert "result-bad" not in panel[pit_start:panel.index("</section>", pit_start)]
     assert "confirmPitCommands" not in panel
     app = (Path(__file__).resolve().parent.parent
            / "ai_race_engineer" / "static" / "ui" / "app.js").read_text(encoding="utf-8")

@@ -220,3 +220,59 @@ def test_an_unsaved_input_type_change_is_called_out():
     # Derived from status.hotkey — the only field that says what is bound now.
     assert "this.status?.hotkey" in app
     assert "status.hotkey" in panel, "the warning must name what is still listening"
+
+
+README = PANEL.parents[3] / "README.md"
+# The ones the user asked to keep at full length: pit-command risk, and every
+# note about what a setting costs. Everything else says what a control does in
+# a line, and links to the README for why.
+_HINT_WORDS = 25
+
+
+def _github_slug(heading: str) -> str:
+    """The anchor GitHub gives a README heading."""
+    text = re.sub(r"[^\w\s-]", "", heading.strip().lower())
+    return re.sub(r"\s", "-", text)
+
+
+def test_every_more_link_lands_on_a_readme_heading():
+    """A "More" link is the hint's other half. A renamed heading would leave
+    it opening the top of the README with nothing to say it broke."""
+    panel = PANEL.read_text(encoding="utf-8")
+    slugs = {_github_slug(line.lstrip("#"))
+             for line in README.read_text(encoding="utf-8").splitlines()
+             if line.startswith("#")}
+    anchors = set(re.findall(r"docs\('([^']+)'\)", panel))
+    assert anchors, "no README links found — has docs() been renamed?"
+    assert not anchors - slugs, f"links to headings that do not exist: {anchors - slugs}"
+
+
+def test_hints_stay_a_line_long():
+    """The panel ran to about sixty hint paragraphs, most of them 20-40 words,
+    and read as a wall of text. A hint says what the control does; the
+    README says why. Only the pit-command risk and cost notes, marked
+    hint-keep, may run longer."""
+    panel = PANEL.read_text(encoding="utf-8")
+    long = []
+    for m in re.finditer(r'<p class="(hint[^"]*)"[^>]*>(.*?)</p>', panel, re.S):
+        if "hint-keep" in m.group(1):
+            continue
+        words = re.sub(r"\{\{.*?\}\}|<[^>]+>", " ", m.group(2)).split()
+        if len(words) > _HINT_WORDS:
+            long.append(f"{len(words)} words: {' '.join(words)[:80]}")
+    assert not long, "\n".join(long)
+
+
+def test_sections_sit_on_the_tab_their_subject_belongs_to():
+    """Radio effect is audio processing, the speech cache and log size are
+    app housekeeping, and pit commands are not telemetry plumbing."""
+    panel = PANEL.read_text(encoding="utf-8")
+    sections = dict((title, tab) for tab, title in re.findall(
+        r'<section class="settings-section" v-show="tab === \'(\w+)\'">\s*<h2>(.*?)</h2>',
+        panel))
+    assert sections["Radio Effect"] == "audio"
+    assert sections["Speech Cache"] == "app"
+    assert sections["Exchange Log"] == "app"
+    assert sections["Appearance"] == "app"
+    assert sections["Pit Commands"] == "race"
+    assert 'v-model="theme"' in panel.split('<h2>Appearance</h2>')[1].split("</section>")[0]

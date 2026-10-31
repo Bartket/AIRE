@@ -32,14 +32,6 @@
                 </div>
             </div>
             <div class="settings-controls">
-                <label class="theme-picker">
-                    <span>Theme</span>
-                    <select v-model="theme" @change="applyTheme">
-                        <option value="auto">Auto</option>
-                        <option value="dark">Dark</option>
-                        <option value="light">Light</option>
-                    </select>
-                </label>
                 <button class="btn btn-secondary" @click="showExchangeLog = true">Exchange Log</button>
                 <button class="btn btn-secondary" @click="showAbout = true">About</button>
                 <button class="btn btn-primary" @click="saveConfig" :disabled="saving || !config">
@@ -87,11 +79,111 @@
                     <input type="checkbox" id="speak-answer" v-model="speakAnswer" />
                     <label for="speak-answer">Speak the answer</label>
                 </div>
-                <p class="hint">
-                    Runs the same pipeline as push-to-talk, minus the microphone —
-                    useful for checking your LLM and telemetry wiring.
-                </p>
+                <p class="hint">The same pipeline as push-to-talk, without the microphone.</p>
             </section>
+
+            <!-- Telemetry -->
+            <section class="settings-section" v-show="tab === 'race'">
+                <h2>Telemetry</h2>
+                <div class="form-group">
+                    <label>Source:</label>
+                    <select v-model="config.telemetry.source">
+                        <option value="auto">Auto (iRacing if available)</option>
+                        <option value="irsdk">iRacing (shared memory)</option>
+                        <option value="simulated">Simulated (no sim required)</option>
+                    </select>
+                </div>
+                <p class="hint" v-if="!status.irsdk_available">
+                    The iRacing SDK is not available in this build, so only simulated
+                    telemetry will work.
+                </p>
+                <p class="hint result-bad" v-else-if="status.telemetry_requested === 'irsdk' && !status.telemetry_connected">
+                    iRacing selected but not connected — start iRacing and get in a session.
+                </p>
+                <p class="hint" v-else-if="status.telemetry_requested !== status.telemetry_source">
+                    Requested <strong>{{ status.telemetry_requested }}</strong>, currently running
+                    <strong>{{ status.telemetry_source }}</strong>.
+                </p>
+                <div class="form-group">
+                    <label>Units:</label>
+                    <select v-model="config.telemetry.units">
+                        <option value="auto">Auto — match iRacing</option>
+                        <option value="metric">Metric — C, km/h, metres</option>
+                        <option value="imperial">Imperial — F, mph, feet</option>
+                    </select>
+                    <p class="hint">Temperatures, speed and distances. Auto follows iRacing's own setting.</p>
+                </div>
+
+                <div class="form-group">
+                    <label>Fuel units:</label>
+                    <select v-model="config.telemetry.fuel_units">
+                        <option value="auto">Auto — match iRacing (litres or gallons)</option>
+                        <option value="litres">Litres</option>
+                        <option value="kg">Kilograms</option>
+                        <option value="gallons">Gallons (US)</option>
+                    </select>
+                    <p class="hint">
+                        Match your car's dashboard; many cars read fuel in kilograms.
+                        <a :href="docs('units')" target="_blank" rel="noopener">More</a>.
+                    </p>
+                </div>
+                <div class="telemetry-grid" v-if="telemetry">
+                    <div><span>Track</span>{{ telemetry.track_name || '—' }}</div>
+                    <div><span>Lap</span>{{ telemetry.current_lap }}</div>
+                    <div><span>Position</span>{{ telemetry.position }}</div>
+                    <div><span>Speed</span>{{ round(telemetry.speed, 0) }} km/h</div>
+                    <div><span>Gear</span>{{ telemetry.gear || '—' }}</div>
+                    <div><span>RPM</span>{{ telemetry.rpm }}</div>
+                    <div><span>Fuel</span>{{ round(telemetry.fuel_level_pct, 0) }}% ({{ round(telemetry.fuel_remaining_laps) }} laps)</div>
+                    <div><span>Flag</span>{{ telemetry.flag }}</div>
+                </div>
+                <p class="hint" v-else>No telemetry yet.</p>
+                            <details class="advanced">
+                    <summary>Advanced</summary>
+                    <div class="form-group">
+                        <label>Poll Interval (s):</label>
+                        <input type="number" v-model.number="config.telemetry.poll_interval" min="0.1" max="5" step="0.1" />
+                    </div>
+                    <div class="form-group form-toggle with-hint">
+                        <input type="checkbox" id="diagnostic-trace" v-model="config.telemetry.diagnostic_trace" />
+                        <label for="diagnostic-trace">Record diagnostic telemetry traces</label>
+                        <p class="hint">
+                            Stores a minute of fuel and gap readings per question. Includes driver
+                            names and radio text.
+                            <a :href="docs('diagnostic-trace-replay')" target="_blank" rel="noopener">More</a>.
+                        </p>
+                    </div>
+                </details>
+            </section>
+
+            <!-- Pit commands -->
+            <section class="settings-section" v-show="tab === 'race'">
+                <h2>Pit Commands</h2>
+                <div class="form-group form-toggle with-hint">
+                    <input type="checkbox" id="pit-commands"
+                           v-model="config.pit_commands.enabled" />
+                    <label for="pit-commands">Enable pit commands — at my own risk</label>
+                    <p class="hint hint-keep">
+                        Start with <strong>pit stop</strong> and the service is read straight from
+                        your words: <em>pit stop four tyres and 30 litres</em> ·
+                        <em>pit stop wet tyres</em> · <em>pit stop fuel 8 gallons</em> ·
+                        <em>pit stop fast repair</em> · <em>pit stop clear all</em>.
+                        Your own phrasing (<em>box me for wets</em>) also works, but the model
+                        interprets it first. AIRE reads the command back: say
+                        <strong>confirm</strong> to set it, or <strong>cancel</strong>.
+                    </p>
+                </div>
+                <div class="form-group form-toggle with-hint" v-if="config.pit_commands.enabled">
+                    <input type="checkbox" id="pit-confirm"
+                           v-model="config.pit_commands.confirm_pit_stop_commands" />
+                    <label for="pit-confirm">Ask me to confirm “pit stop …” commands</label>
+                    <p class="hint hint-keep">
+                        Off: a command starting with <strong>pit stop</strong> is set at once and
+                        read back as set, with no chance to cancel a misheard one. Commands in
+                        your own words are always confirmed, because the model interpreted them.
+                    </p>
+                </div>
+</section>
 
             <!-- LLM -->
             <section class="settings-section" v-show="tab === 'engineer'">
@@ -112,17 +204,16 @@
                         :placeholder="apiKeyPlaceholder"
                     />
                     <p class="hint" v-if="config.llm.provider === 'openrouter'">
-                        Get one at openrouter.ai/keys. You can also set the
-                        <code>OPENROUTER_API_KEY</code> environment variable instead.
-                        Keys entered here are saved locally in plain-text config.json.
+                        Get one at openrouter.ai/keys. Saved locally, in plain text.
+                        <a :href="docs('openrouter-default')" target="_blank" rel="noopener">More</a>.
                     </p>
                     <p class="hint" v-else>Usually blank for Ollama.</p>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" v-if="config.llm.provider === 'local'">
                     <label>Endpoint:</label>
                     <input type="text" v-model="activeProvider.endpoint" />
-                    <p class="hint">OpenAI-compatible base URL (must include <code>/v1</code>).</p>
+                    <p class="hint">OpenAI-compatible base URL, including <code>/v1</code>.</p>
                 </div>
 
                 <div class="form-group">
@@ -151,54 +242,18 @@
                             {{ loadingModels ? 'Loading…' : 'Browse models' }}
                         </button>
                     </div>
-                </div>
                     <p class="hint" v-if="config.llm.provider === 'openrouter'">
                         <strong v-if="modelIsRecommended" class="result-ok">Known good.</strong>
                         <strong v-else>Untested — use at your own risk.</strong>
                         A weaker model quietly ignores the rules that keep the engineer honest.
-                        <a :href="docs('caveats')" target="_blank" rel="noopener">What was tested</a>.
+                        <a :href="docs('openrouter-default')" target="_blank" rel="noopener">What was tested</a>.
                     </p>
+                </div>
 
-                <div class="form-group">
-                    <label>Temperature:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.llm.temperature" min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.llm.temperature }}</span>
-                    </div>
-                    <p class="hint">How much the wording varies between answers. Not heat. Low keeps the same telemetry giving the same call twice, which is what you want from an engineer; high makes it chatty and less predictable.</p>
-                </div>
-                <div class="form-group">
-                    <label>Max Tokens:</label>
-                    <input type="number" v-model.number="config.llm.max_tokens" min="16" max="500" />
-                    <p class="hint">Length cap while racing — this is what keeps answers to one sentence. Raise it and you will be listening through a corner. Post-race debriefs use a separate, larger budget.</p>
-                </div>
                 <div class="form-group">
                     <label>Memory (past turns):</label>
                     <input type="number" v-model.number="config.llm.history_turns" min="0" max="12" />
-                    <p class="hint">How many past exchanges it remembers, so “and the car behind?” works. Zero makes every question standalone; each turn adds a little cost.</p>
-                </div>
-
-                <div class="form-group">
-                    <label>Calculations:</label>
-                    <select v-model="config.llm.use_tools">
-                        <option value="auto">Let the model call them (recommended)</option>
-                        <option value="off">Off — fold the numbers into the prompt</option>
-                    </select>
-                    <p class="hint">
-                        Fuel, pit windows, gaps and pace are worked out in Python either
-                        way. <strong>Turn off if you use a local model</strong> that
-                        handles tool calling badly — the same figures get sent with the
-                        question instead, in one round trip rather than two.
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label>Timeout (s):</label>
-                    <input type="number" v-model.number="config.llm.timeout" min="5" max="120" step="1" />
-                    <p class="hint">
-                        How long to wait before giving up. A stalled provider should go
-                        quiet quickly rather than answer a corner too late.
-                    </p>
+                    <p class="hint hint-keep">How many past exchanges it remembers, so “and the car behind?” works. Zero makes every question standalone; each turn adds a little cost.</p>
                 </div>
 
                 <div class="form-group">
@@ -210,14 +265,55 @@
                     </p>
                 </div>
 
+                <details class="advanced">
+                    <summary>Advanced</summary>
+                    <div class="form-group" v-if="config.llm.provider !== 'local'">
+                        <label>Endpoint:</label>
+                        <input type="text" v-model="activeProvider.endpoint" />
+                        <p class="hint">OpenAI-compatible base URL, including <code>/v1</code>.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.llm.temperature" min="0" max="1" step="0.05" />
+                            <span class="range-value">{{ config.llm.temperature }}</span>
+                        </div>
+                        <p class="hint">How much the wording varies. Ignored by models that do not take one, Claude Haiku 5.5 among them.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens:</label>
+                        <input type="number" v-model.number="config.llm.max_tokens" min="16" max="500" />
+                        <p class="hint">
+                            The length cap that keeps race answers to one sentence.
+                            <a :href="docs('reasoning-models-think-on-the-same-budget-they-speak-with')" target="_blank" rel="noopener">More</a>.
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>Calculations:</label>
+                        <select v-model="config.llm.use_tools">
+                            <option value="auto">Let the model call them (recommended)</option>
+                            <option value="off">Off — fold the numbers into the prompt</option>
+                        </select>
+                        <p class="hint">Turn off only for a local model that handles tool calling badly.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Timeout (s):</label>
+                        <input type="number" v-model.number="config.llm.timeout" min="5" max="120" step="1" />
+                        <p class="hint">How long to wait for the provider before giving up.</p>
+                    </div>
+                </details>
+            </section>
+
+            <!-- Persona -->
+            <section class="settings-section" v-show="tab === 'engineer'">
+                <h2>Persona</h2>
                 <div class="form-group">
                     <label>Call me:</label>
                     <input type="text" v-model="config.driver_callsign"
                            placeholder="Leave blank to use your iRacing name"
                            maxlength="40">
                     <p class="hint">
-                        What the engineer says out loud. Pick something short you like hearing —
-                        your real name stays available if you ask for it.
+                        What the engineer calls you on the radio.
                         <a :href="docs('what-the-engineer-calls-you')" target="_blank" rel="noopener">More</a>.
                     </p>
                 </div>
@@ -226,8 +322,8 @@
                     <label>System Prompt:</label>
                     <textarea v-model="config.system_prompt" rows="8"></textarea>
                     <p class="hint">
-                        How the engineer sounds. The rules that stop it inventing anything are
-                        always added, whatever this says. Leave it blank for the default.
+                        How the engineer sounds. The rules against inventing anything are always
+                        added. Blank means the default.
                     </p>
                     <button class="btn btn-secondary" @click="resetSection('system_prompt')">
                         Restore default prompt
@@ -244,18 +340,13 @@
                         <option value="hold">Hold to talk — records while held</option>
                         <option value="toggle">Toggle — press to open, press again to send</option>
                     </select>
-                    <p class="hint">
-                        <strong>Toggle is how a real pit radio works</strong> and frees your
-                        thumb mid-corner. Whichever you pick, the recording stops on its own
-                        at the cut-off below, so a forgotten second press or a stuck button
-                        never records your whole stint.
-                    </p>
+                    <p class="hint">Toggle frees your thumb mid-corner, like a real pit radio.</p>
                 </div>
                 <div class="form-group">
                     <label>Maximum recording (s):</label>
                     <input type="number" v-model.number="config.audio.max_record_seconds"
                            min="2" max="120" step="1" />
-                    <p class="hint">
+                    <p class="hint hint-keep">
                         Hard stop on a single recording. Transcription is billed by
                         length, so this caps a runaway press as well as the wait.
                     </p>
@@ -282,10 +373,8 @@
                         </button>
                     </div>
                     <p class="hint">
-                        Click <strong>Bind a key</strong>, then press the key or combination
-                        you want — <code>Ctrl+R</code>, <code>Alt+Shift+Q</code>, or a single
-                        key. Pick something you do not use in-car; it is captured globally
-                        while iRacing has focus.
+                        A key or combination you do not use in-car; it works while iRacing has focus.
+                        <a :href="docs('push-to-talk-binding')" target="_blank" rel="noopener">More</a>.
                     </p>
                 </div>
 
@@ -318,13 +407,9 @@
                         </button>
                     </div>
                     <p class="hint">
-                        Click <strong>Bind a button</strong>, then press the wheel button you want.
-                        It is matched by device ID, so it survives being plugged into another USB port.
-                        Pick a button you do not use in-sim — it keeps working while iRacing has focus.
+                        A button you do not use in-sim. It survives moving to another USB port.
                     </p>
                 </template>
-
-                <p class="hint">Hold the button to record, release to send.</p>
             </section>
 
             <!-- Voice -->
@@ -337,14 +422,14 @@
                         v-model="config.elevenlabs.api_key"
                         :placeholder="config.elevenlabs.api_key_set ? 'Saved — leave blank to keep' : 'Enter key'"
                     />
-                    <p class="hint">Used for both speech recognition and the engineer's voice. Saved locally in plain-text config.json.</p>
+                    <p class="hint">For speech recognition and the voice. Saved locally, in plain text.</p>
                 </div>
                 <div class="form-group">
                     <label>STT Model:</label>
                     <select v-model="config.elevenlabs.stt_model">
                         <option value="scribe_v2">Scribe v2</option>
                     </select>
-                    <p class="hint">Speech recognition — what turns your question into text. Scribe v2 biases toward the surnames in your session, which is what makes a name land.</p>
+                    <p class="hint">Speech recognition, biased toward the surnames in your session.</p>
                 </div>
                 <div class="form-group">
                     <label>TTS Model:</label>
@@ -353,180 +438,7 @@
                         <option value="eleven_multilingual_v2">Multilingual v2 (twice the price)</option>
                         <option value="eleven_v3">Eleven v3 (twice the price)</option>
                     </select>
-                    <p class="hint">The engineer's voice. Flash is the fastest and the cheapest per character, which is what matters while you are waiting mid-corner. The other two cost twice as much per character and are slower on this path; Multilingual reads numbers slightly better.</p>
-                </div>
-            </section>
-
-            <!-- Voice delivery -->
-            <section class="settings-section" v-show="tab === 'voice'">
-                <h2>Voice Delivery</h2>
-
-                <div class="callout">
-                    <strong>Voice stuttering or slurring? Go back to Most stable.</strong>
-                    It is these sliders, not your PC — <strong>Style above 0</strong> is
-                    the usual culprit. A single bad take can still happen; say
-                    <strong>“that was gibberish”</strong> and AIRE will regenerate it.
-                    <div class="preset-row">
-                        <button class="btn btn-secondary" @click="applyVoicePreset('stable')">
-                            Most stable (default)
-                        </button>
-                        <button class="btn btn-secondary" @click="applyVoicePreset('balanced')">
-                            Balanced
-                        </button>
-                        <button class="btn btn-secondary" @click="applyVoicePreset('expressive')">
-                            Expressive
-                        </button>
-                    </div>
-                    <p class="hint" v-if="voiceWarnings.length">
-                        <strong>Outside the recommended range:</strong>
-                        <span v-for="w in voiceWarnings" :key="w">{{ w }} </span>
-                    </p>
-                    <p class="hint" v-else>All settings are inside ElevenLabs' recommended ranges.</p>
-                </div>
-
-                <div class="form-group">
-                    <label>Hard-to-say names:</label>
-                    <select v-model="config.elevenlabs.name_policy">
-                        <option value="auto">Auto — use the car number when a name looks risky</option>
-                        <option value="names">Always use names</option>
-                        <option value="numbers">Always use car numbers</option>
-                    </select>
-                    <p class="hint">
-                        Works out which names the voice will fight, and says those as the car
-                        number instead. Track names and accents are always handled.
-                        <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">How it decides</a>.
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label>Say it like this:</label>
-                    <p class="hint">
-                        Spell a name how it should sound and the voice says it the same way every
-                        time. Only the audio changes — the engineer still knows the real name.
-                        <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">More</a>.
-                    </p>
-                    <div v-for="(row, i) in pronunciationRows" :key="i" class="preset-row">
-                        <input type="text" v-model="row.from" placeholder="Kovács"
-                               @change="savePronunciation" style="flex:1">
-                        <span style="opacity:.6">say as</span>
-                        <input type="text" v-model="row.to" placeholder="Kovach"
-                               @change="savePronunciation" style="flex:1">
-                        <button class="btn btn-secondary" @click="removePronunciation(i)"
-                                title="Remove">&times;</button>
-                    </div>
-                    <button class="btn btn-secondary" @click="addPronunciation">
-                        Add a name
-                    </button>
-                </div>
-
-                <div class="form-group">
-                    <label>Stability:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.elevenlabs.voice_settings.stability"
-                               min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.elevenlabs.voice_settings.stability }}</span>
-                    </div>
-                    <p class="hint">
-                        Low = more emotion, high = more consistent.
-                        <strong>Hearing artefacts? Raise this first.</strong>
-                        Under 0.3 is unstable; 0.6–0.85 is safe.
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Similarity:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.elevenlabs.voice_settings.similarity_boost"
-                               min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.elevenlabs.voice_settings.similarity_boost }}</span>
-                    </div>
-                    <p class="hint">
-                        How closely it sticks to the original voice. Default 0.75.
-                        Below 0.5 it drifts; very high can distort.
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Speed:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.elevenlabs.voice_settings.speed"
-                               min="0.7" max="1.2" step="0.05" />
-                        <span class="range-value">{{ config.elevenlabs.voice_settings.speed }}×</span>
-                    </div>
-                    <p class="hint">
-                        Keep to 0.9–1.1. <strong>1.2 is the maximum and the most likely
-                        cause of slurred words.</strong> 1.05 sounds suitably urgent.
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Style exaggeration:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.elevenlabs.voice_settings.style"
-                               min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.elevenlabs.voice_settings.style }}</span>
-                    </div>
-                    <p class="hint">
-                        <strong>Leave this at 0.</strong> ElevenLabs recommend it
-                        unconditionally — above 0 it is the usual cause of stuttering,
-                        slurring and held sounds, and it adds latency. Not every model
-                        supports it either.
-                    </p>
-                </div>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="speaker-boost"
-                           v-model="config.elevenlabs.voice_settings.use_speaker_boost" />
-                    <label for="speaker-boost">Speaker boost (fuller voice, slightly slower)</label>
-                </div>
-                <div class="form-group inline-row">
-                    <button class="btn btn-secondary" @click="resetSection('elevenlabs')">
-                        Reset voice settings
-                    </button>
-                </div>
-                <p class="hint">
-                    Puts stability, similarity, style and speed back to their shipped
-                    values. Your API key and chosen voice are left alone.
-                </p>
-                <div class="form-group inline-row">
-                    <button class="btn btn-secondary" @click="previewRadio" :disabled="previewing">
-                        {{ previewing ? 'Rendering…' : 'Preview through radio' }}
-                    </button>
-                    <button class="btn btn-secondary" @click="previewRadio(false)" :disabled="previewing">
-                        Preview dry
-                    </button>
-                </div>
-            </section>
-
-            <!-- Speech cache -->
-            <section class="settings-section" v-show="tab === 'voice'">
-                <h2>Speech Cache</h2>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="cache-speech" v-model="config.elevenlabs.cache_speech" />
-                    <label for="cache-speech">Reuse audio for phrases already spoken</label>
-                </div>
-                <p class="hint">
-                    Speech is the largest cost per question and is billed per character every
-                    time. Refusals are word-for-word identical by design, so replaying them
-                    from disk is free — and about <strong>25x faster</strong> than
-                    synthesizing them again.
-                </p>
-                <div class="form-group inline-row" v-if="cacheStats">
-                    <span class="binding-display">
-                        {{ cacheStats.entries }} phrases · {{ cacheStats.size_mb }} of
-                        {{ cacheStats.max_mb }} MB · {{ Math.round(cacheStats.hit_rate * 100) }}% hit rate
-                    </span>
-                    <button class="btn btn-secondary" @click="refreshCache">Refresh</button>
-                    <button class="btn btn-secondary" @click="clearCache">Clear</button>
-                </div>
-                <p class="hint" v-if="cacheStats && cacheStats.hits">
-                    Saved {{ cacheStats.seconds_served }} seconds of synthesis so far this run.
-                </p>
-                <div class="form-group">
-                    <label>Cache limit (MB):</label>
-                    <input type="number" v-model.number="config.elevenlabs.cache_mb" min="0" max="2048" step="16" />
-                    <p class="hint">
-                        Least-recently-used phrases are dropped past this. 0 disables the
-                        cache. Clear it after changing voice settings if you want the old
-                        entries gone — new settings key separately, so they are never
-                        served by mistake.
-                    </p>
+                    <p class="hint hint-keep">The engineer's voice. Flash is the fastest and the cheapest per character, which is what matters while you are waiting mid-corner. The other two cost twice as much per character and are slower on this path; Multilingual reads numbers slightly better.</p>
                 </div>
             </section>
 
@@ -608,306 +520,127 @@
                 </div>
             </section>
 
-            <!-- Radio effect -->
+            <!-- Voice delivery -->
             <section class="settings-section" v-show="tab === 'voice'">
-                <h2>Radio Effect</h2>
-                <div class="form-group inline-row">
-                    <button class="btn btn-secondary" @click="resetSection('radio_effect')">
-                        Reset radio effect
-                    </button>
-                </div>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="radio-enabled" v-model="config.radio_effect.enabled" />
-                    <label for="radio-enabled">Enable radio effect</label>
-                </div>
-                <p class="hint">
-                    Broadcast pit-radio character: narrow band, comms compression,
-                    a presence lift at 2 kHz, and a mic click at each end.
-                </p>
-                <div class="form-group">
-                    <label>Intensity (band narrowness + grit):</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.radio_effect.intensity" min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.radio_effect.intensity }}</span>
-                    </div>
-                    <p class="hint">How narrow the radio band is and how hard it saturates. Higher is more like a real pit radio; at maximum it starts to distort.</p>
-                    <p class="hint">1.0 gives a 400–3000 Hz comms band, closest to an F1 world feed.</p>
-                </div>
-                <div class="form-group">
-                    <label>Compression (radio AGC):</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.radio_effect.compression" min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.radio_effect.compression }}</span>
-                    </div>
-                    <p class="hint">Evens out loud and quiet words. This is most of the effect.</p>
-                </div>
-                <div class="form-group">
-                    <label>Noise bed:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.radio_effect.noise" min="0" max="1" step="0.02" />
-                        <span class="range-value">{{ config.radio_effect.noise }}</span>
-                    </div>
-                    <p class="hint">
-                        Band-limited, not hiss. Real race radio is nearly clean — keep this
-                        low, or at 0 for digital-clear.
-                    </p>
-                </div>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="radio-squelch" v-model="config.radio_effect.squelch" />
-                    <label for="radio-squelch">Squelch clicks (mic keying on and off)</label>
-                </div>
-                <div class="form-group">
-                    <label>Bandpass:</label>
-                    <div class="filter-controls">
-                        <div class="form-group">
-                            <label>Low cut:</label>
-                            <div class="range-row">
-                                <input type="range" v-model.number="config.radio_effect.low_cut" min="100" max="1000" step="50" />
-                                <span class="range-value">{{ config.radio_effect.low_cut }} Hz</span>
-                            </div>
-                            <p class="hint">Everything below this is thrown away. Raising it thins the voice out, which is most of what makes it sound like radio.</p>
-                        </div>
-                        <div class="form-group">
-                            <label>High cut:</label>
-                            <div class="range-row">
-                                <input type="range" v-model.number="config.radio_effect.high_cut" min="2000" max="6000" step="100" />
-                                <span class="range-value">{{ config.radio_effect.high_cut }} Hz</span>
-                            </div>
-                            <p class="hint">Everything above this is thrown away. Lowering it dulls the voice and hides sibilance.</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-group inline-row">
-                    <button class="btn btn-secondary" @click="previewRadio" :disabled="previewing">
-                        {{ previewing ? 'Rendering…' : 'Preview radio effect' }}
-                    </button>
-                    <button class="btn btn-secondary" @click="previewRadio(false)" :disabled="previewing">
-                        Preview dry (no effect)
-                    </button>
-                </div>
-                <p class="hint">Saves settings, then plays a sample so you can A/B the two.</p>
-            </section>
+                <h2>Voice Delivery</h2>
 
-            <!-- Ducking -->
-            <section class="settings-section" v-show="tab === 'audio'">
-                <h2>Audio Ducking</h2>
-                <p class="hint">Lowers another app's volume while the engineer speaks. Windows only.</p>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="ducking-enabled" v-model="config.ducking.enabled" />
-                    <label for="ducking-enabled">Enable ducking</label>
-                </div>
-                <div class="form-group">
-                    <label>Duck Level:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.ducking.duck_level" min="0" max="1" step="0.05" />
-                        <span class="range-value">{{ config.ducking.duck_level }}</span>
-                    </div>
-                    <p class="hint">The volume the other app drops <em>to</em>, not the amount taken off. 0.15 means Crew Chief plays at 15% while the engineer speaks. 1.0 is no ducking.</p>
-                </div>
-                <div class="form-group">
-                    <label>Process:</label>
-                    <div class="inline-row">
-                        <div class="combo combo-narrow">
-                            <input
-                                type="text"
-                                v-model="config.ducking.process_name"
-                                placeholder="e.g. CrewChiefV4.exe"
-                                @focus="duckListOpen = true"
-                                @input="duckListOpen = true"
-                                @keydown.esc="duckListOpen = false"
-                            />
-                            <ul class="combo-list" v-if="duckListOpen && filteredDuckProcesses.length" @mousedown.prevent>
-                                <li v-for="d in filteredDuckProcesses" :key="d.id" @click="pickDuckProcess(d.id)">
-                                    <span class="combo-id">{{ d.name }}</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <button class="btn btn-secondary" @click="loadDevices" :disabled="loadingDevices">
-                            {{ loadingDevices ? 'Scanning…' : 'Refresh' }}
+                <div class="callout">
+                    <strong>Voice stuttering or slurring? Go back to Most stable.</strong>
+                    It is these sliders, not your PC — <strong>Style above 0</strong> is
+                    the usual culprit. A single bad take can still happen; say
+                    <strong>“that was gibberish”</strong> and AIRE will regenerate it.
+                    <div class="preset-row">
+                        <button class="btn btn-secondary" @click="applyVoicePreset('stable')">
+                            Most stable (default)
+                        </button>
+                        <button class="btn btn-secondary" @click="applyVoicePreset('balanced')">
+                            Balanced
+                        </button>
+                        <button class="btn btn-secondary" @click="applyVoicePreset('expressive')">
+                            Expressive
                         </button>
                     </div>
+                    <p class="hint" v-if="voiceWarnings.length">
+                        <strong>Outside the recommended range:</strong>
+                        <span v-for="w in voiceWarnings" :key="w">{{ w }} </span>
+                    </p>
+                    <p class="hint" v-else>All settings are inside ElevenLabs' recommended ranges.</p>
+                </div>
+
+                <div class="form-group">
+                    <label>Hard-to-say names:</label>
+                    <select v-model="config.elevenlabs.name_policy">
+                        <option value="auto">Auto — use the car number when a name looks risky</option>
+                        <option value="names">Always use names</option>
+                        <option value="numbers">Always use car numbers</option>
+                    </select>
                     <p class="hint">
-                        Lists apps that have played audio. If yours is missing, type its
-                        exe name, or make it speak once and hit Refresh.
+                        Says a name the voice would fight as the car number instead.
+                        <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">How it decides</a>.
                     </p>
                 </div>
-            </section>
 
-
-            <!-- App -->
-            <section class="settings-section" v-show="tab === 'app'">
-                <h2>Window</h2>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="hide-to-tray" v-model="config.desktop.hide_to_tray" />
-                    <label for="hide-to-tray">Closing the window hides it to the tray</label>
-                </div>
-                <p class="hint">
-                    Keeps push-to-talk alive while iRacing is fullscreen; quit from the tray
-                    menu. Turn this off and the close button quits instead. Takes effect on
-                    restart.
-                </p>
-                <p class="hint">
-                    Launching AIRE again while it is already running raises this window
-                    rather than starting a second copy.
-                </p>
-            </section>
-
-            <section class="settings-section" v-show="tab === 'app'">
-                <h2>Restore Defaults</h2>
-                <div class="form-group inline-row">
-                    <button class="btn btn-secondary" @click="resetAll">
-                        Restore all settings to defaults
+                <div class="form-group">
+                    <label>Say it like this:</label>
+                    <p class="hint">
+                        Spell a name how it should sound. Only the audio changes.
+                        <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">More</a>.
+                    </p>
+                    <div v-for="(row, i) in pronunciationRows" :key="i" class="preset-row">
+                        <input type="text" v-model="row.from" placeholder="Kovács"
+                               @change="savePronunciation" style="flex:1">
+                        <span style="opacity:.6">say as</span>
+                        <input type="text" v-model="row.to" placeholder="Kovach"
+                               @change="savePronunciation" style="flex:1">
+                        <button class="btn btn-secondary" @click="removePronunciation(i)"
+                                title="Remove">&times;</button>
+                    </div>
+                    <button class="btn btn-secondary" @click="addPronunciation">
+                        Add a name
                     </button>
                 </div>
-                <p class="hint">
-                        Puts every setting back to how it ships. Your API keys, chosen voice,
-                        favourites, pronunciations and push-to-talk binding are kept. Voice and
-                        Audio can be reset on their own.
-                    </p>
-            </section>
 
-            <section class="settings-section" v-show="tab === 'app'">
-                <h2>Performance</h2>
-                <div class="form-group form-toggle">
-                    <input type="checkbox" id="low-priority" v-model="config.performance.low_priority" />
-                    <label for="low-priority">Give the sim priority over AIRE</label>
+                <div class="form-group inline-row">
+                    <button class="btn btn-secondary" @click="previewRadio" :disabled="previewing">
+                        {{ previewing ? 'Rendering…' : 'Preview through radio' }}
+                    </button>
+                    <button class="btn btn-secondary" @click="previewRadio(false)" :disabled="previewing">
+                        Preview dry
+                    </button>
                 </div>
-                <p class="hint">
-                    Runs AIRE below normal priority, so if the sim and the engineer want the
-                    same core, the sim wins. Costs nothing when the machine is not busy —
-                    priority only decides who is scheduled under contention. Takes effect on
-                    restart.
-                </p>
-                <p class="hint">
-                    Idle, AIRE uses about <strong>0.3% of a modern CPU</strong>. Most of its
-                    memory is the settings panel, not the engineer.
-                </p>
-            </section>
-
-            <!-- Telemetry -->
-            <section class="settings-section" v-show="tab === 'race'">
-                <h2>Telemetry</h2>
-                <div class="form-group">
-                    <label>Source:</label>
-                    <select v-model="config.telemetry.source">
-                        <option value="auto">Auto (iRacing if available)</option>
-                        <option value="irsdk">iRacing (shared memory)</option>
-                        <option value="simulated">Simulated (no sim required)</option>
-                    </select>
-                    <p class="hint">Takes effect as soon as you save — no restart needed.</p>
-                </div>
-                <p class="hint" v-if="!status.irsdk_available">
-                    The iRacing SDK is not available in this build, so only simulated
-                    telemetry will work.
-                </p>
-                <p class="hint result-bad" v-else-if="status.telemetry_requested === 'irsdk' && !status.telemetry_connected">
-                    iRacing selected but not connected — start iRacing and get in a session.
-                </p>
-                <p class="hint" v-else-if="status.telemetry_requested !== status.telemetry_source">
-                    Requested <strong>{{ status.telemetry_requested }}</strong>, currently running
-                    <strong>{{ status.telemetry_source }}</strong>.
-                </p>
-                <div class="form-group">
-                    <label>Units:</label>
-                    <select v-model="config.telemetry.units">
-                        <option value="auto">Auto — match iRacing</option>
-                        <option value="metric">Metric — C, km/h, metres</option>
-                        <option value="imperial">Imperial — F, mph, feet</option>
-                    </select>
-                    <p class="hint">
-                        Temperatures, speed, gaps in distance and air pressure.
-                        <strong>Auto follows iRacing's own setting</strong>, so the
-                        engineer reads back the same units you are already looking
-                        at. Fuel is set separately below, because your car's dash
-                        decides that rather than where you live.
-                    </p>
-                </div>
-
-                <div class="form-group">
-                    <label>Fuel units:</label>
-                    <select v-model="config.telemetry.fuel_units">
-                        <option value="auto">Auto — match iRacing (litres or gallons)</option>
-                        <option value="litres">Litres</option>
-                        <option value="kg">Kilograms</option>
-                        <option value="gallons">Gallons (US)</option>
-                    </select>
-                    <p class="hint">
-                        Set this to whatever your car's dashboard shows — many cars read fuel in
-                        kilograms, not litres. Get it wrong and the numbers will not match your dash.
-                        <a :href="docs('units')" target="_blank" rel="noopener">More</a>.
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Poll Interval (s):</label>
-                    <input type="number" v-model.number="config.telemetry.poll_interval" min="0.1" max="5" step="0.1" />
-                </div>
-                <div class="form-group form-toggle with-hint">
-                    <input type="checkbox" id="diagnostic-trace" v-model="config.telemetry.diagnostic_trace" />
-                    <label for="diagnostic-trace">Record diagnostic telemetry traces</label>
-                    <p class="hint">
-                        Off by default. When enabled, each question stores the preceding minute of
-                        relevant fuel and gap readings in a bounded local file. The trace includes
-                        driver names and radio text.
-                    </p>
-                </div>
-                <div class="form-group form-toggle with-hint">
-                    <input type="checkbox" id="pit-commands"
-                           v-model="config.pit_commands.enabled" />
-                    <label for="pit-commands">Enable pit commands — at my own risk</label>
-                    <p class="hint">
-                        Start with <strong>pit stop</strong> and the service is read straight from
-                        your words: <em>pit stop four tyres and 30 litres</em> ·
-                        <em>pit stop wet tyres</em> · <em>pit stop fuel 8 gallons</em> ·
-                        <em>pit stop fast repair</em> · <em>pit stop clear all</em>.
-                        Your own phrasing (<em>box me for wets</em>) also works, but the model
-                        interprets it first. AIRE reads the command back: say
-                        <strong>confirm</strong> to set it, or <strong>cancel</strong>.
-                    </p>
-                </div>
-                <div class="form-group form-toggle with-hint" v-if="config.pit_commands.enabled">
-                    <input type="checkbox" id="pit-confirm"
-                           v-model="config.pit_commands.confirm_pit_stop_commands" />
-                    <label for="pit-confirm">Ask me to confirm “pit stop …” commands</label>
-                    <p class="hint">
-                        Off: a command starting with <strong>pit stop</strong> is set at once and
-                        read back as set, with no chance to cancel a misheard one. Commands in
-                        your own words are always confirmed, because the model interpreted them.
-                    </p>
-                </div>
-                <div class="telemetry-grid" v-if="telemetry">
-                    <div><span>Track</span>{{ telemetry.track_name || '—' }}</div>
-                    <div><span>Lap</span>{{ telemetry.current_lap }}</div>
-                    <div><span>Position</span>{{ telemetry.position }}</div>
-                    <div><span>Speed</span>{{ round(telemetry.speed, 0) }} km/h</div>
-                    <div><span>Gear</span>{{ telemetry.gear || '—' }}</div>
-                    <div><span>RPM</span>{{ telemetry.rpm }}</div>
-                    <div><span>Fuel</span>{{ round(telemetry.fuel_level_pct, 0) }}% ({{ round(telemetry.fuel_remaining_laps) }} laps)</div>
-                    <div><span>Flag</span>{{ telemetry.flag }}</div>
-                </div>
-                <p class="hint" v-else>No telemetry yet.</p>
-            </section>
-
-            <!-- Engineer volume -->
-            <section class="settings-section" v-show="tab === 'audio'">
-                <h2>Engineer Volume &amp; Boost</h2>
-                <div class="form-group">
-                    <label>Engineer voice level:</label>
-                    <div class="range-row">
-                        <input type="range" v-model.number="config.audio.volume" min="0" max="2" step="0.05" />
-                        <span class="range-value" :class="{ 'boosting': config.audio.volume > 1 }">
-                            {{ Math.round(config.audio.volume * 100) }}%
-                        </span>
+                <details class="advanced">
+                    <summary>Advanced</summary>
+                    <div class="form-group">
+                        <label>Stability:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.elevenlabs.voice_settings.stability"
+                                   min="0" max="1" step="0.05" />
+                            <span class="range-value">{{ config.elevenlabs.voice_settings.stability }}</span>
+                        </div>
+                        <p class="hint">
+                            <strong>Hearing artefacts? Raise this first.</strong> 0.6–0.85 is safe.
+                            <a :href="docs('elevenlabs-voice-delivery')" target="_blank" rel="noopener">More</a>.
+                        </p>
                     </div>
-                    <div class="inline-row">
-                        <button class="btn btn-secondary" @click="config.audio.volume = 1">Unity (100%)</button>
-                        <button class="btn btn-secondary" @click="config.audio.volume = 1.5">Boost 150%</button>
-                        <button class="btn btn-secondary" @click="config.audio.volume = 2">Max boost 200%</button>
+                    <div class="form-group">
+                        <label>Similarity:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.elevenlabs.voice_settings.similarity_boost"
+                                   min="0" max="1" step="0.05" />
+                            <span class="range-value">{{ config.elevenlabs.voice_settings.similarity_boost }}</span>
+                        </div>
+                        <p class="hint">How closely it sticks to the original voice. Below 0.5 it drifts.</p>
                     </div>
-                    <p class="hint">
-                        Above 100% a soft limiter raises loudness without clipping; the radio
-                        band-pass throws away the low end, so the voice needs it. +5 dB at 200%.
-                    </p>
-                </div>
+                    <div class="form-group">
+                        <label>Speed:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.elevenlabs.voice_settings.speed"
+                                   min="0.7" max="1.2" step="0.05" />
+                            <span class="range-value">{{ config.elevenlabs.voice_settings.speed }}×</span>
+                        </div>
+                        <p class="hint">Keep to 0.9–1.1; <strong>1.2 is the likeliest cause of slurring.</strong></p>
+                    </div>
+                    <div class="form-group">
+                        <label>Style exaggeration:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.elevenlabs.voice_settings.style"
+                                   min="0" max="1" step="0.05" />
+                            <span class="range-value">{{ config.elevenlabs.voice_settings.style }}</span>
+                        </div>
+                        <p class="hint"><strong>Leave this at 0.</strong> Above it is the usual cause of stuttering.</p>
+                    </div>
+                    <div class="form-group form-toggle">
+                        <input type="checkbox" id="speaker-boost"
+                               v-model="config.elevenlabs.voice_settings.use_speaker_boost" />
+                        <label for="speaker-boost">Speaker boost (fuller voice, slightly slower)</label>
+                    </div>
+                    <div class="form-group inline-row">
+                        <button class="btn btn-secondary" @click="resetSection('elevenlabs')">
+                            Reset voice settings
+                        </button>
+                    </div>
+                    <p class="hint">Back to the shipped values; your key and voice are kept.</p>
+                </details>
             </section>
 
             <!-- Audio devices -->
@@ -949,16 +682,238 @@
                         <button class="btn btn-secondary" @click="testBeep(false)">Hear open</button>
                         <button class="btn btn-secondary" @click="testBeep(true)">Hear close</button>
                     </div>
+                    <p class="hint">A tone as the mic keys, and a falling pair on release.</p>
+                </div>
+            </section>
+
+            <!-- Engineer volume -->
+            <section class="settings-section" v-show="tab === 'audio'">
+                <h2>Engineer Volume &amp; Boost</h2>
+                <div class="form-group">
+                    <label>Engineer voice level:</label>
+                    <div class="range-row">
+                        <input type="range" v-model.number="config.audio.volume" min="0" max="2" step="0.05" />
+                        <span class="range-value" :class="{ 'boosting': config.audio.volume > 1 }">
+                            {{ Math.round(config.audio.volume * 100) }}%
+                        </span>
+                    </div>
+                    <div class="inline-row">
+                        <button class="btn btn-secondary" @click="config.audio.volume = 1">Unity (100%)</button>
+                        <button class="btn btn-secondary" @click="config.audio.volume = 1.5">Boost 150%</button>
+                        <button class="btn btn-secondary" @click="config.audio.volume = 2">Max boost 200%</button>
+                    </div>
                     <p class="hint">
-                        A short tone as the mic keys, and the classic descending
-                        "roger" pair on release — same 300–3000 Hz band as the radio.
+                        Above 100% a soft limiter adds loudness without clipping.
+                        <a :href="docs('engineer-voice-volume')" target="_blank" rel="noopener">More</a>.
                     </p>
                 </div>
-                <div class="form-group">
-                    <label>Exchange Log Size:</label>
-                    <input type="number" v-model.number="config.memory_log" min="1" max="200" />
-                    <p class="hint">How many exchanges the log keeps. Memory only — it changes nothing about what you are billed.</p>
+            </section>
+
+            <!-- Radio effect -->
+            <section class="settings-section" v-show="tab === 'audio'">
+                <h2>Radio Effect</h2>
+                <div class="form-group form-toggle">
+                    <input type="checkbox" id="radio-enabled" v-model="config.radio_effect.enabled" />
+                    <label for="radio-enabled">Enable radio effect</label>
                 </div>
+                <p class="hint">
+                    Narrow band, compression and a mic click, like a pit radio.
+                    <a :href="docs('radio-effect')" target="_blank" rel="noopener">More</a>.
+                </p>
+                <div class="form-group">
+                    <label>Intensity (band narrowness + grit):</label>
+                    <div class="range-row">
+                        <input type="range" v-model.number="config.radio_effect.intensity" min="0" max="1" step="0.05" />
+                        <span class="range-value">{{ config.radio_effect.intensity }}</span>
+                    </div>
+                    <p class="hint">Higher is more like a real pit radio; at maximum it distorts.</p>
+                </div>
+                <div class="form-group inline-row">
+                    <button class="btn btn-secondary" @click="previewRadio" :disabled="previewing">
+                        {{ previewing ? 'Rendering…' : 'Preview radio effect' }}
+                    </button>
+                    <button class="btn btn-secondary" @click="previewRadio(false)" :disabled="previewing">
+                        Preview dry (no effect)
+                    </button>
+                </div>
+                <p class="hint">Saves settings, then plays a sample so you can A/B the two.</p>
+                <details class="advanced">
+                    <summary>Advanced</summary>
+                    <div class="form-group">
+                        <label>Compression (radio AGC):</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.radio_effect.compression" min="0" max="1" step="0.05" />
+                            <span class="range-value">{{ config.radio_effect.compression }}</span>
+                        </div>
+                        <p class="hint">Evens out loud and quiet words; most of the effect.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Noise bed:</label>
+                        <div class="range-row">
+                            <input type="range" v-model.number="config.radio_effect.noise" min="0" max="1" step="0.02" />
+                            <span class="range-value">{{ config.radio_effect.noise }}</span>
+                        </div>
+                        <p class="hint">Keep it low; real race radio is nearly clean.</p>
+                    </div>
+                    <div class="form-group form-toggle">
+                        <input type="checkbox" id="radio-squelch" v-model="config.radio_effect.squelch" />
+                        <label for="radio-squelch">Squelch clicks (mic keying on and off)</label>
+                    </div>
+                    <div class="form-group">
+                        <label>Bandpass:</label>
+                        <div class="filter-controls">
+                            <div class="form-group">
+                                <label>Low cut:</label>
+                                <div class="range-row">
+                                    <input type="range" v-model.number="config.radio_effect.low_cut" min="100" max="1000" step="50" />
+                                    <span class="range-value">{{ config.radio_effect.low_cut }} Hz</span>
+                                </div>
+                                <p class="hint">Raising it thins the voice out.</p>
+                            </div>
+                            <div class="form-group">
+                                <label>High cut:</label>
+                                <div class="range-row">
+                                    <input type="range" v-model.number="config.radio_effect.high_cut" min="2000" max="6000" step="100" />
+                                    <span class="range-value">{{ config.radio_effect.high_cut }} Hz</span>
+                                </div>
+                                <p class="hint">Lowering it dulls the voice and hides sibilance.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group inline-row">
+                        <button class="btn btn-secondary" @click="resetSection('radio_effect')">
+                            Reset radio effect
+                        </button>
+                    </div>
+                </details>
+            </section>
+
+            <!-- Ducking -->
+            <section class="settings-section" v-show="tab === 'audio'">
+                <h2>Audio Ducking</h2>
+                <p class="hint">Lowers another app's volume while the engineer speaks. Windows only.</p>
+                <div class="form-group form-toggle">
+                    <input type="checkbox" id="ducking-enabled" v-model="config.ducking.enabled" />
+                    <label for="ducking-enabled">Enable ducking</label>
+                </div>
+                <div class="form-group">
+                    <label>Duck Level:</label>
+                    <div class="range-row">
+                        <input type="range" v-model.number="config.ducking.duck_level" min="0" max="1" step="0.05" />
+                        <span class="range-value">{{ config.ducking.duck_level }}</span>
+                    </div>
+                    <p class="hint">The level the other app drops <em>to</em>: 0.15 plays it at 15%.</p>
+                </div>
+                <div class="form-group">
+                    <label>Process:</label>
+                    <div class="inline-row">
+                        <div class="combo combo-narrow">
+                            <input
+                                type="text"
+                                v-model="config.ducking.process_name"
+                                placeholder="e.g. CrewChiefV4.exe"
+                                @focus="duckListOpen = true"
+                                @input="duckListOpen = true"
+                                @keydown.esc="duckListOpen = false"
+                            />
+                            <ul class="combo-list" v-if="duckListOpen && filteredDuckProcesses.length" @mousedown.prevent>
+                                <li v-for="d in filteredDuckProcesses" :key="d.id" @click="pickDuckProcess(d.id)">
+                                    <span class="combo-id">{{ d.name }}</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <button class="btn btn-secondary" @click="loadDevices" :disabled="loadingDevices">
+                            {{ loadingDevices ? 'Scanning…' : 'Refresh' }}
+                        </button>
+                    </div>
+                    <p class="hint">Apps that have played audio. Missing? Type its exe name.</p>
+                </div>
+            </section>
+
+            <!-- Appearance -->
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Appearance</h2>
+                <div class="form-group">
+                    <label>Theme:</label>
+                    <select v-model="theme" @change="applyTheme">
+                        <option value="auto">Auto — follow Windows</option>
+                        <option value="dark">Dark</option>
+                        <option value="light">Light</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- App -->
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Window</h2>
+                <div class="form-group form-toggle">
+                    <input type="checkbox" id="hide-to-tray" v-model="config.desktop.hide_to_tray" />
+                    <label for="hide-to-tray">Closing the window hides it to the tray</label>
+                </div>
+                <p class="hint">Keeps push-to-talk alive while iRacing is fullscreen. Takes effect on restart.</p>
+            </section>
+
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Performance</h2>
+                <div class="form-group form-toggle">
+                    <input type="checkbox" id="low-priority" v-model="config.performance.low_priority" />
+                    <label for="low-priority">Give the sim priority over AIRE</label>
+                </div>
+                <p class="hint">
+                    When both want the same core, the sim wins. Takes effect on restart.
+                    <a :href="docs('performance')" target="_blank" rel="noopener">More</a>.
+                </p>
+            </section>
+
+            <!-- Speech cache -->
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Speech Cache</h2>
+                <div class="form-group form-toggle">
+                    <input type="checkbox" id="cache-speech" v-model="config.elevenlabs.cache_speech" />
+                    <label for="cache-speech">Reuse audio for phrases already spoken</label>
+                </div>
+                <p class="hint hint-keep">
+                    Speech is the largest cost per question and is billed per character every
+                    time. Refusals are word-for-word identical by design, so replaying them
+                    from disk is free — and about <strong>25x faster</strong> than
+                    synthesizing them again.
+                </p>
+                <div class="form-group inline-row" v-if="cacheStats">
+                    <span class="binding-display">
+                        {{ cacheStats.entries }} phrases · {{ cacheStats.size_mb }} of
+                        {{ cacheStats.max_mb }} MB · {{ Math.round(cacheStats.hit_rate * 100) }}% hit rate
+                    </span>
+                    <button class="btn btn-secondary" @click="refreshCache">Refresh</button>
+                    <button class="btn btn-secondary" @click="clearCache">Clear</button>
+                </div>
+                <p class="hint" v-if="cacheStats && cacheStats.hits">
+                    Saved {{ cacheStats.seconds_served }} seconds of synthesis so far this run.
+                </p>
+                <div class="form-group">
+                    <label>Cache limit (MB):</label>
+                    <input type="number" v-model.number="config.elevenlabs.cache_mb" min="0" max="2048" step="16" />
+                    <p class="hint">The oldest phrases are dropped past this. 0 disables the cache.</p>
+                </div>
+            </section>
+
+            <!-- Exchange log -->
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Exchange Log</h2>
+                <div class="form-group">
+                    <label>Entries kept:</label>
+                    <input type="number" v-model.number="config.memory_log" min="1" max="200" />
+                    <p class="hint">Memory only — it changes nothing about what you are billed.</p>
+                </div>
+            </section>
+
+            <section class="settings-section" v-show="tab === 'app'">
+                <h2>Restore Defaults</h2>
+                <div class="form-group inline-row">
+                    <button class="btn btn-secondary" @click="resetAll">
+                        Restore all settings to defaults
+                    </button>
+                </div>
+                <p class="hint">Keeps your API keys, voice, favourites, pronunciations and push-to-talk binding.</p>
             </section>
         </main>
 
@@ -1020,7 +975,7 @@
                         <p>
                             <a :href="docs()" target="_blank" rel="noopener">Documentation and source</a>
                             &middot;
-                            <a :href="docs('caveats')" target="_blank" rel="noopener">Known limits</a>
+                            <a :href="docs('known-limits')" target="_blank" rel="noopener">Known limits</a>
                             &middot;
                             <a :href="docs('questions-it-supports')" target="_blank" rel="noopener">Questions it supports</a>
                             &middot;

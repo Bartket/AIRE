@@ -270,32 +270,53 @@ body {
   border-color: var(--border-strong);
 }
 
-/* Theme picker. Labelled and in the header rather than buried in a tab: an
-   icon that cycles through three states tells nobody what it does, and a
-   setting nobody can find is one nobody uses. */
-.theme-picker {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  white-space: nowrap;
+/* The Advanced fold. Settings a driver rarely touches stay one click away
+   instead of competing with the ones everybody needs. Native <details>, so
+   it works from the keyboard with no script. */
+.advanced {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
 }
 
-.theme-picker select {
-  padding: 0.4rem 0.55rem;
-  background: var(--surface-sunken);
-  color: var(--text);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 0.85rem;
+.advanced > summary {
   cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: var(--spacing-xs) 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
   transition: var(--transition-smooth);
 }
 
-.theme-picker select:hover {
-  border-color: var(--border-strong);
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced > summary::before {
+  content: '\25B8';
+  display: inline-block;
+  width: 1.1em;
+  transition: transform 0.15s ease;
+}
+
+.advanced[open] > summary {
+  margin-bottom: var(--spacing-md);
+}
+
+.advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.advanced > summary:hover {
+  color: var(--text);
+}
+
+.advanced > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
 }
 
 .btn-primary {
