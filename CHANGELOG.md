@@ -73,6 +73,11 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- Confirming a pit command with anything but the bare word — *“Yes,
+  confirm”*, *“Confirmed”*, *“Copy, confirm”* — threw the command away and
+  passed the words to the model, which could answer *“Confirmed, car's all
+  clear”* with nothing set. They now commit it. A bare *“yes”* keeps the
+  command waiting and asks for the word.
 - The engineer could read out a note to itself: "Wait, that exceeds my
   limit of one sentence at 25 words? Let me count…". Written as one
   paragraph, it got past the check that keeps only the final draft. Where a

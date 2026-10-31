@@ -724,3 +724,65 @@ def test_an_empty_command_from_the_strict_schema_still_fails_closed():
     arrive as an empty string. It has to land where a missing one did."""
     client, _ = _classifier("openrouter", '{"kind":"command","command":"  "}')
     assert client.interpret_pit_command("box box", ["Dry"]).kind == "error"
+
+
+def _held(tmp_path, monkeypatch, confirm=True):
+    """An orchestrator whose model must never be asked anything."""
+    config = AppConfig({
+        "telemetry": {"source": "simulated"},
+        "pit_commands": {"enabled": True, "confirm_pit_stop_commands": confirm},
+    }, path=tmp_path / "config.json")
+    orch = Orchestrator(config)
+    orch.telemetry = _CommandTelemetry()
+    monkeypatch.setattr(
+        orch.llm, "generate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("reached the model")))
+    async def directly(function, *args):
+        return function(*args)
+    monkeypatch.setattr(asyncio, "to_thread", directly)
+    return orch
+
+
+def test_a_confirmation_in_radio_words_commits(tmp_path, monkeypatch):
+    """Only the bare word "confirm" used to count. "Yes, confirm" and
+    "Confirmed" discarded the command and went to the model, which — live —
+    answered "Confirmed, car's all clear" while nothing had been set."""
+    for reply in ("Yes, confirm.", "Confirmed.", "Copy, confirm.",
+                  "Confirm it.", "Confirm the pit stop."):
+        orch = _held(tmp_path, monkeypatch)
+        asyncio.run(orch.ask("pit stop fast repair", speak=False))
+        committed = asyncio.run(orch.ask(reply, speak=False))
+        assert committed["answer"] == "Pit stop set.", reply
+        assert orch.telemetry.applied == [(PitCommand("fr"),)], reply
+
+    for reply in ("Cancel that.", "No, cancel."):
+        orch = _held(tmp_path, monkeypatch)
+        asyncio.run(orch.ask("pit stop fast repair", speak=False))
+        assert asyncio.run(orch.ask(reply, speak=False))["answer"] == \
+            "Pit command cancelled; nothing was changed.", reply
+        assert orch.telemetry.applied == [], reply
+
+
+def test_agreement_without_the_word_holds_the_command_and_never_reaches_the_model(
+        tmp_path, monkeypatch):
+    """"Yes" is not a confirmation — the write stays behind a deliberate word —
+    but handing it to the model is how the false "Confirmed" was heard."""
+    orch = _held(tmp_path, monkeypatch)
+    asyncio.run(orch.ask("pit stop fast repair", speak=False))
+
+    for reply in ("Yes.", "Go ahead.", "Copy that."):
+        held = asyncio.run(orch.ask(reply, speak=False))
+        assert held["answer"] == "Say confirm to set it; nothing's changed yet.", reply
+    assert orch.telemetry.applied == []
+
+    asyncio.run(orch.ask("confirm", speak=False))
+    assert orch.telemetry.applied == [(PitCommand("fr"),)]
+
+
+def test_mixed_or_extra_words_are_not_a_confirmation(tmp_path, monkeypatch):
+    """A keyword inside a longer sentence is not the deliberate turn."""
+    from ai_race_engineer.orchestrator import _pit_control
+
+    for text in ("confirm and cancel", "I can't confirm that tyre wear",
+                 "can you confirm my fuel", "yes"):
+        assert _pit_control(text) is None, text

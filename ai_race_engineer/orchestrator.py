@@ -55,6 +55,36 @@ def _is_repeat_request(text: str) -> bool:
     return normalise_question(text) in _REPEAT_REQUESTS
 
 
+# A held pit command is committed by the word the read-back asks for, and only
+# that word: "confirm". What changed is what may stand around it. Only the bare
+# word counted, so "Yes, confirm", "Confirmed" and "Copy, confirm" each
+# discarded the command and went to the model — which, measured, answered
+# "Confirmed, car's all clear…" while nothing had been set.
+_CONFIRM_WORDS = {"confirm", "confirmed"}
+_CONFIRM_FILLER = {"yes", "yeah", "yep", "copy", "roger", "ok", "okay",
+                   "please", "it", "that", "this", "the", "pit", "stop", "then"}
+_CANCEL_WORDS = {"cancel", "cancelled", "canceled"}
+_CANCEL_FILLER = {"no", "nope", "please", "it", "that", "this", "the", "pit",
+                  "stop", "command"}
+# Agreement without the keyword. Not a confirmation — the write stays behind a
+# deliberate word — but not an unrelated turn either: dropping the command and
+# handing "yes" to the model is how the false "Confirmed" was heard.
+_AFFIRMATIVES = {"yes", "yeah", "yep", "yes please", "copy", "copy that",
+                 "roger", "roger that", "affirmative", "ok", "okay",
+                 "go ahead", "do it", "go for it", "sounds good"}
+
+
+def _pit_control(text: str) -> Optional[str]:
+    """`confirm` or `cancel` when that is all the transmission says."""
+    words = normalise_question(text).split()
+    for kind, keywords, filler in (("confirm", _CONFIRM_WORDS, _CONFIRM_FILLER),
+                                   ("cancel", _CANCEL_WORDS, _CANCEL_FILLER)):
+        if (any(word in keywords for word in words)
+                and all(word in keywords or word in filler for word in words)):
+            return kind
+    return None
+
+
 class _Timings:
     """Stage stopwatch for one exchange, in milliseconds.
 
@@ -858,7 +888,7 @@ class Orchestrator:
         self, question: str
     ) -> Optional[tuple[str, str]]:
         """Interpret, propose, or commit a pit write behind confirmation."""
-        control = normalise_question(question)
+        control = _pit_control(question)
         pending = self._pending_pit_command
         if pending is not None and (
                 time.monotonic() - self._pending_pit_command_at
@@ -885,6 +915,11 @@ class Orchestrator:
         if control == "cancel" and pending is not None:
             self._clear_pending_pit_command()
             return "Pit command cancelled; nothing was changed.", "pit_command:cancelled"
+
+        if pending is not None and normalise_question(question) in _AFFIRMATIVES:
+            # Held, not refreshed: the window still runs from the read-back.
+            return ("Say confirm to set it; nothing's changed yet.",
+                    "pit_command:awaiting_confirm")
 
         explicit = is_pit_command(question)
         # Whether the feature is off is knowable before any of the work below,
