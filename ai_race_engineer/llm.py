@@ -55,6 +55,14 @@ _TOOL_CALL_TOKENS = 512
 # so it returns a finished thought and no speech. Measured on a local
 # qwen3.6: 400 tokens to reach a tool call, 1,119 to reach an answer.
 _THINKING_TOKENS = 2048
+# How hard a reasoning model thinks before it speaks, sent to OpenRouter only.
+# None sends nothing and leaves the model on its own default. That is the
+# measured choice, not an oversight: on Claude Haiku 5.5 (default `medium`),
+# `low` was slower on every question that called a calculator and dropped more
+# of the model check, and `none` stopped calling the calculators at all and
+# subtracted lap times itself. Re-measure with `evals --floor 5 --effort` before
+# setting this for another model.
+_REASONING_EFFORT: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -183,9 +191,11 @@ class LLMError(RuntimeError):
 class LLMClient:
     """OpenAI-compatible chat client with a short rolling memory."""
 
-    def __init__(self, config: AppConfig, prompt_builder: Optional[PromptBuilder] = None):
+    def __init__(self, config: AppConfig, prompt_builder: Optional[PromptBuilder] = None,
+                 reasoning_effort: Optional[str] = _REASONING_EFFORT):
         self._config = config
         self._prompts = prompt_builder or PromptBuilder(config)
+        self._reasoning_effort = reasoning_effort
         self._client = httpx.Client(timeout=30.0)
         # (question, answer) pairs replayed as context on later questions.
         self._history: Deque[Tuple[str, str]] = deque(maxlen=16)
@@ -579,6 +589,11 @@ If the requested tyre type is not in that list, use ambiguous."""
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        # Not to local servers: Ollama, LM Studio and vLLM each read this
+        # differently or not at all. OpenRouter drops it for a model that
+        # does not reason.
+        if settings["provider"] == PROVIDER_OPENROUTER and self._reasoning_effort:
+            payload["reasoning"] = {"effort": self._reasoning_effort}
 
         try:
             resp = self._client.post(

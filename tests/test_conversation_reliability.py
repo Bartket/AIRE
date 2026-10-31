@@ -355,3 +355,40 @@ def test_the_debrief_keeps_the_name_and_its_sentences():
     answer = client.generate("How did that go?", snapshot)
 
     assert "Bart" in answer and "P4 from P7" in answer
+
+
+def test_the_app_leaves_reasoning_effort_to_the_model():
+    """Measured, not assumed: on Claude Haiku 5.5 `low` was slower on every
+    calculator question and dropped more of the model check, and `none`
+    stopped calling the calculators. The evals can still send one to measure."""
+    from ai_race_engineer.llm import LLMClient
+
+    sent = []
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"finish_reason": "stop",
+                                 "message": {"content": "Copy."}}]}
+
+    def post(_url, json=None, **_kw):
+        sent.append(json)
+        return _Response()
+
+    config = AppConfig({"llm": {"openrouter": {"api_key": "x"}}})
+    app = LLMClient(config)
+    app._client.post = post
+    app._chat([{"role": "user", "content": "?"}])
+    assert "reasoning" not in sent[-1]
+
+    probe = LLMClient(config, reasoning_effort="low")
+    probe._client.post = post
+    probe._chat([{"role": "user", "content": "?"}])
+    assert sent[-1]["reasoning"] == {"effort": "low"}
+
+    local = LLMClient(AppConfig({"llm": {"provider": "local"}}), reasoning_effort="low")
+    local._client.post = post
+    local._chat([{"role": "user", "content": "?"}])
+    assert "reasoning" not in sent[-1]

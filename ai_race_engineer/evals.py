@@ -3,12 +3,15 @@
 import argparse
 import json
 import re
+import statistics
+import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from .config import AppConfig
-from .llm import LLMClient, NO_ANSWER
+from .llm import _REASONING_EFFORT, COMMS_FAILURE, LLMClient, NO_ANSWER
 from .telemetry import TelemetrySnapshot, session_kind
+from .telemetry.simulated import SimulatedTelemetryAdapter
 from .text import normalise_question
 
 
@@ -128,15 +131,152 @@ def evaluate(records: Iterable[Dict[str, Any]], config: AppConfig,
     return results
 
 
+# The model check, as a command rather than a memory. Each probe is a question
+# no deterministic route answers, so it reaches the model, and each check is a
+# failure that reached a real session. A model is judged on pass^k — every one
+# of k runs clean — because the driver hears every answer, not the best of k.
+_SPA_CORNERS = ("la source", "eau rouge", "raidillon", "kemmel", "les combes",
+                "malmedy", "rivage", "pouhon", "fagnes", "campus", "stavelot",
+                "blanchimont", "bus stop")
+
+Check = Callable[[str, str], bool]
+
+
+def _used_a_calculator(answer: str, route: str) -> bool:
+    return route.startswith("tool:") or route == "deterministic"
+
+
+def _no_figures(answer: str, route: str) -> bool:
+    return not re.search(r"\d", answer)
+
+
+def _no_corner_name(answer: str, route: str) -> bool:
+    return not any(corner in answer.lower() for corner in _SPA_CORNERS)
+
+
+def _floor_snapshot() -> TelemetrySnapshot:
+    """The simulated race, with what the real reader cannot see taken out.
+
+    The fixture publishes brake temperatures and live tyre figures; iRacing
+    publishes neither out on track. Left in, "how hot are my brakes" would
+    be answered from data no driver's engineer will ever have.
+    """
+    snapshot = SimulatedTelemetryAdapter().get_telemetry_snapshot()
+    car = snapshot.car
+    car.brake_fl_temp = car.brake_fr_temp = None
+    car.brake_rl_temp = car.brake_rr_temp = None
+    car.tyre_data_live = False
+    return snapshot
+
+
+_FLOOR_PROBES: List[tuple] = [
+    ("Which corner am I losing time in?",
+     [("names no corner", _no_corner_name)]),
+    ("How much quicker is Rossi than me per lap?",
+     [("calls a calculator", _used_a_calculator)]),
+    # Not "the gap to the leader": the running order states that one, and
+    # reading it out is not arithmetic. Silva's gap has to be subtracted.
+    ("How far am I behind Silva?",
+     [("calls a calculator", _used_a_calculator)]),
+    ("How hot are my brakes?",
+     [("invents no reading", _no_figures)]),
+    ("How are my tyres looking?",
+     [("reads out no stale figures", _no_figures)]),
+]
+
+
+def floor_check(config: AppConfig, runs: int,
+                reasoning_effort: Optional[str]) -> List[Dict[str, Any]]:
+    """Ask every probe `runs` times from a clean history; record what it cost."""
+    client = LLMClient(config, reasoning_effort=reasoning_effort)
+    results = []
+    try:
+        for question, checks in _FLOOR_PROBES:
+            for run in range(1, runs + 1):
+                snapshot = _floor_snapshot()
+                client.reset_history()
+                client.reset_usage()
+                started = time.perf_counter()
+                answer = client.generate(question, snapshot)
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                route = client.last_route
+                failures = [name for name, check in checks
+                            if not check(answer, route)]
+                if not answer or answer in (NO_ANSWER, COMMS_FAILURE):
+                    failures.append("answers at all")
+                failures += grade_record(
+                    {"question": question, "route": route,
+                     "snapshot": snapshot.to_dict()}, answer)
+                results.append({
+                    "question": question, "run": run, "answer": answer,
+                    "route": route, "failures": failures,
+                    "llm_ms": round(elapsed_ms), "usage": client.last_usage,
+                })
+    finally:
+        client.close()
+    return results
+
+
+def _report_floor(results: List[Dict[str, Any]], runs: int) -> int:
+    failed_probes = 0
+    for question, _ in _FLOOR_PROBES:
+        mine = [r for r in results if r["question"] == question]
+        clean = sum(1 for r in mine if not r["failures"])
+        verdict = "PASS" if clean == len(mine) else "FAIL"
+        failed_probes += verdict == "FAIL"
+        print(f"{verdict} {clean}/{len(mine)}  {question}")
+        for r in mine:
+            mark = "  " if not r["failures"] else "x "
+            print(f"   {mark}[{r['route']}, {r['llm_ms']} ms] {r['answer']}")
+            for failure in r["failures"]:
+                print(f"       - {failure}")
+
+    def spread(values: List[float]) -> str:
+        if not values:
+            return "n/a"
+        ordered = sorted(values)
+        p95 = ordered[min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))]
+        return f"median {statistics.median(ordered):.0f}, p95 {p95:.0f}"
+
+    print(f"\nllm ms: {spread([r['llm_ms'] for r in results])}")
+    for key in ("completion", "calls"):
+        values = [r["usage"][key] for r in results if key in r["usage"]]
+        print(f"{key} per question: {spread(values)}")
+    print(f"pass^{runs}: {len(_FLOOR_PROBES) - failed_probes}/{len(_FLOOR_PROBES)} probes")
+    return 1 if failed_probes else 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Grade or replay an AIRE diagnostic trace")
-    parser.add_argument("trace", type=Path)
+    parser.add_argument("trace", type=Path, nargs="?")
     parser.add_argument("--config")
     parser.add_argument(
         "--replay-model", action="store_true",
         help="Call the configured LLM for each trace entry; this incurs API cost",
     )
+    parser.add_argument(
+        "--floor", type=int, metavar="K",
+        help="Ask every model-check probe K times on simulated telemetry; "
+             "this incurs API cost",
+    )
+    parser.add_argument(
+        "--effort", default="app",
+        help="With --floor: reasoning effort to send (none, low, medium, high), "
+             "'default' to send none, or 'app' for what the app sends",
+    )
     args = parser.parse_args(argv)
+    if args.floor:
+        config = AppConfig.load(args.config)
+        effort = {"app": _REASONING_EFFORT,
+                  "default": None}.get(args.effort, args.effort)
+        settings = config.llm_settings()
+        print(f"Model check: {settings['model']} via {settings['provider']}, "
+              f"reasoning effort {effort or 'model default'}, "
+              f"{len(_FLOOR_PROBES)} probes x {args.floor} runs. "
+              "This calls the model and costs money.\n")
+        return _report_floor(floor_check(config, args.floor, effort), args.floor)
+    if args.trace is None:
+        parser.error("a trace file is required unless --floor is given")
     try:
         records = load_trace(args.trace)
     except (OSError, ValueError) as exc:
