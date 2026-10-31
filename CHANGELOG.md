@@ -56,6 +56,11 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Added
 
+- **Ask me to confirm “pit stop …” commands**, on the Race tab, on by
+  default. Off, a command starting with *pit stop* is set as soon as it is
+  spoken and read back as set. Commands in your own words are always
+  confirmed, because the model interpreted them. The panel now shows the
+  *pit stop* form with examples, alongside the confirm and cancel words.
 - Each exchange in the log shows the session type iRacing reported and what
   the engineer took it for (e.g. `Practice → practice`). An unrecognised or
   empty type is treated as a race on purpose, and until now nothing showed

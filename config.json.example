@@ -77,7 +77,8 @@
     "diagnostic_trace": false
   },
   "pit_commands": {
-    "enabled": false
+    "enabled": false,
+    "confirm_pit_stop_commands": true
   },
   "desktop": {
     "hide_to_tray": true

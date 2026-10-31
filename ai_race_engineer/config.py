@@ -190,6 +190,10 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
         # error can change the next stop, so it ships disabled and every
         # command still needs a separate spoken confirmation when enabled.
         "enabled": False,
+        # The driver may waive that confirmation for the "pit stop …" form
+        # only, which is parsed by the strict grammar from their own words.
+        # Commands the model had to interpret are always confirmed.
+        "confirm_pit_stop_commands": True,
     },
     "desktop": {
         # Closing the window hides it to the tray so push-to-talk survives a

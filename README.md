@@ -294,6 +294,13 @@ Speak to it as you would a human engineer; the wording is not a command list:
 > gallons and take the tear-off · No tyres this stop · Turn refuelling back on
 > · Clear everything
 
+Or start with **pit stop** and it is read straight from your words by a
+strict grammar, with no model involved:
+
+> Pit stop four tyres and 30 litres · Pit stop wet tyres · Pit stop fuel 8
+> gallons · Pit stop four tyres at 21 PSI · Pit stop fast repair · Pit stop
+> clear all
+
 Questions remain questions: *“Should I take wets?”* or *“How much fuel do I
 need?”* cannot arm a command. For an instruction, the LLM produces a restricted
 local proposal; it cannot write to iRacing. A deterministic parser rejects
@@ -301,10 +308,18 @@ unsupported services, unavailable tyre types, and any fuel or pressure amount
 that was invented, converted, or omitted.
 
 AIRE reads back the exact settings it parsed and does nothing yet. Say
-**confirm** in the next transmission to commit them, or **cancel** to discard
-them. Any unrelated transmission, a 30-second delay, a session change, or
+**confirm** in the next transmission to commit them (*“yes, confirm”* and
+*“confirmed”* work too), or **cancel** to discard them. A bare *“yes”* or *“go
+ahead”* is not taken as a confirmation: the engineer asks for the word and
+keeps the command waiting. Any unrelated transmission, a 30-second delay, a session change, or
 turning the setting off also discards the pending command. Fuel calculations
 and ordinary answers never set the pit stop.
+
+**Ask me to confirm “pit stop …” commands** (on by default) can be switched off
+on the Race tab. A command that starts with *pit stop* is then set as soon as
+you say it, and read back as set — so a misheard one cannot be cancelled
+first. Commands in your own words are always confirmed, because the model
+interpreted them.
 
 “Enable refuelling” or “turn refuelling back on” rechecks fuel service at the
 amount already selected. It does not mean fill the tank or calculate a new

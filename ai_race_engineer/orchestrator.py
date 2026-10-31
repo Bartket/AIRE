@@ -955,6 +955,7 @@ class Orchestrator:
         compounds = self.telemetry.pit_tire_compounds()
         command_text = question
         plan = None
+        interpreted = False
         if explicit:
             try:
                 plan = parse_pit_command(command_text, compounds)
@@ -963,6 +964,7 @@ class Orchestrator:
                 # ordinary human phrasing rather than the canonical grammar.
                 pass
         if plan is None:
+            interpreted = True
             with self._timings.stage("pit_classifier"):
                 interpretation = await asyncio.to_thread(
                     self.llm.interpret_pit_command,
@@ -996,6 +998,20 @@ class Orchestrator:
         ready, reason = self.telemetry.pit_commands_ready()
         if not ready:
             return f"I couldn't arm that command: {reason}.", "pit_command:not_ready"
+
+        # The driver may waive the confirmation, and only for the "pit stop …"
+        # form: there the plan is the strict grammar applied to their own
+        # words. Anything the model interpreted keeps the second turn, because
+        # a misreading is a risk the driver never chose. Fail-safe: anything
+        # but an explicit False still confirms.
+        confirm = self.config.get("pit_commands", {}).get(
+            "confirm_pit_stop_commands", True) is not False
+        if not interpreted and not confirm:
+            applied, reason = await asyncio.to_thread(
+                self.telemetry.apply_pit_commands, plan.commands)
+            if not applied:
+                return f"I couldn't verify the pit stop: {reason}.", "pit_command:unverified"
+            return f"Pit stop set: {plan.summary}.", "pit_command:committed"
 
         self._pending_pit_command = plan
         self._pending_pit_command_at = time.monotonic()

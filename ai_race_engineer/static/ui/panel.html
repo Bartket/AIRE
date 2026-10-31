@@ -855,8 +855,23 @@
                            v-model="config.pit_commands.enabled" />
                     <label for="pit-commands">Enable pit commands — at my own risk</label>
                     <p class="hint">
-                        Speak naturally; AIRE reads each command back and waits for a separate
-                        <strong>confirm</strong>.
+                        Start with <strong>pit stop</strong> and the service is read straight from
+                        your words: <em>pit stop four tyres and 30 litres</em> ·
+                        <em>pit stop wet tyres</em> · <em>pit stop fuel 8 gallons</em> ·
+                        <em>pit stop fast repair</em> · <em>pit stop clear all</em>.
+                        Your own phrasing (<em>box me for wets</em>) also works, but the model
+                        interprets it first. AIRE reads the command back: say
+                        <strong>confirm</strong> to set it, or <strong>cancel</strong>.
+                    </p>
+                </div>
+                <div class="form-group form-toggle with-hint" v-if="config.pit_commands.enabled">
+                    <input type="checkbox" id="pit-confirm"
+                           v-model="config.pit_commands.confirm_pit_stop_commands" />
+                    <label for="pit-confirm">Ask me to confirm “pit stop …” commands</label>
+                    <p class="hint">
+                        Off: a command starting with <strong>pit stop</strong> is set at once and
+                        read back as set, with no chance to cancel a misheard one. Commands in
+                        your own words are always confirmed, because the model interpreted them.
                     </p>
                 </div>
                 <div class="telemetry-grid" v-if="telemetry">

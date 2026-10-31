@@ -474,7 +474,9 @@ def test_commands_ship_off_and_the_ui_names_the_risk(tmp_path):
              / "ai_race_engineer" / "static" / "ui" / "panel.html").read_text(encoding="utf-8")
     assert 'v-model="config.pit_commands.enabled"' in panel
     assert "at my own risk" in panel
-    assert "Speak naturally" in panel
+    # The exact form is shown, and so is the fact that it is not the only one.
+    assert "<em>pit stop four tyres and 30 litres</em>" in panel
+    assert "Your own phrasing" in panel
     assert "<strong>confirm</strong>" in panel
     assert "result-bad" not in panel[panel.index('id="pit-commands"'):]
     assert "confirmPitCommands" not in panel
@@ -786,3 +788,37 @@ def test_mixed_or_extra_words_are_not_a_confirmation(tmp_path, monkeypatch):
     for text in ("confirm and cancel", "I can't confirm that tyre wear",
                  "can you confirm my fuel", "yes"):
         assert _pit_control(text) is None, text
+
+
+def test_the_pit_stop_form_can_skip_confirmation_when_the_driver_asks(
+        tmp_path, monkeypatch):
+    orch = _held(tmp_path, monkeypatch, confirm=False)
+    result = asyncio.run(orch.ask("pit stop four tyres and thirty litres", speak=False))
+
+    assert result["answer"] == "Pit stop set: four tyres and 30 litres of fuel."
+    assert len(orch.telemetry.applied) == 1
+
+
+def test_words_the_model_interpreted_are_confirmed_whatever_the_setting(
+        tmp_path, monkeypatch):
+    """Waiving the confirmation is the driver's call about their own words.
+    A model's reading of them is a risk they did not choose."""
+    orch = _held(tmp_path, monkeypatch, confirm=False)
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda *_args: PitCommandInterpretation("command", "pit stop wet tyres"))
+
+    proposal = asyncio.run(orch.ask("Box me for wets", speak=False))
+
+    assert proposal["answer"] == "Confirm: wet tyres; say confirm to commit."
+    assert orch.telemetry.applied == []
+
+
+def test_only_an_explicit_false_waives_confirmation(tmp_path, monkeypatch):
+    """A hand-edited "false" string must not silently remove the safety step."""
+    for value in ("false", None, 0):
+        orch = _held(tmp_path, monkeypatch, confirm=value)
+        result = asyncio.run(orch.ask("pit stop fast repair", speak=False))
+        assert result["answer"].startswith("Confirm:"), value
+        assert orch.telemetry.applied == [], value
+    assert _DEFAULT_CONFIG["pit_commands"]["confirm_pit_stop_commands"] is True

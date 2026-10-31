@@ -45,7 +45,7 @@ def test_adjacent_toggle_hints_stay_with_their_controls():
     one, making the diagnostic and pit-command explanations look swapped.
     """
     panel = PANEL.read_text(encoding="utf-8")
-    for control_id in ("diagnostic-trace", "pit-commands"):
+    for control_id in ("diagnostic-trace", "pit-commands", "pit-confirm"):
         grouped = re.search(
             rf'<div class="form-group form-toggle with-hint">'
             rf'.*?id="{control_id}".*?<p class="hint">.*?</p>\s*</div>',
