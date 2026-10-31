@@ -143,7 +143,11 @@ should be green between items.
 
 - [ ] **25 · F12 — adapter capability manifest**, read by the prompt *and* the calculators
 - [ ] **26 · F12/F9 — capability profile per eval record**
-- [ ] **27 · F5 — decide prompt caching** once item 6 has a live reading
+- [x] **27 · F5 — decide prompt caching** once item 6 has a live reading
+  *Decided: not doing it.* The default moved to Claude Haiku 5.5 at a tenth of
+  4.5's price, so the LLM is about 6% of a question's cost. Haiku 5.5 would
+  cache this prefix (its minimum is 512 tokens, not 4,096), but the most it
+  could save is about $0.0003 a question. Closed in `TODO.md` item 2.
 - [ ] **28 · F11 — route user-facing strings through one lookup**; README note on `language`
 - [ ] **29 · TODO 3 — Le Mans Ultimate reader**, on top of item 25
 

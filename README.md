@@ -390,7 +390,7 @@ Everything is in the settings panel, grouped by tab. The same values live in
 | Tab | What is there |
 | --- | --- |
 | **Race** | Ask by text, telemetry source, units, fuel units, opt-in pit commands, live readout |
-| **Engineer** | LLM provider, key, model, temperature, tool calling, timeout, what to call you, system prompt |
+| **Engineer** | LLM provider, key, model, temperature (ignored by models that do not take one, Claude Haiku 5.5 among them), tool calling, timeout, what to call you, system prompt |
 | **Voice** | ElevenLabs key, STT/TTS models, voice picker, delivery settings, speech cache, radio effect |
 | **Audio** | Input/output devices, engineer volume and boost, radio blips, Audio ducking |
 | **Input** | Push-to-talk mode, recording cut-off, keyboard or wheel binding |
@@ -753,15 +753,16 @@ not a quote; the provider dashboards are authoritative for your account.
 Figures are measured, not estimated: answers average 78 characters, which is
 the 25-word limit doing its job.
 
-**Speech is the largest single line, at about 46%.** If that matters:
+**Speech is the largest single line** — about 46% on Haiku 4.5, about two
+thirds on Haiku 5.5. If that matters:
 
 - The **speech cache** is on by default and makes every repeated phrase free
   — see below
 - Point `llm.provider` at a local server and the LLM cost goes to zero
 - Lower `elevenlabs.tts_model` to a Flash model, or shorten answers, to cut
   the largest line item
-- Roughly 1,340 of the ~2,300 prompt tokens are the same system prompt and
-  tool schemas on every call, so prompt caching has real headroom
+- Prompt caching is not worth it on Haiku 5.5: the most it could save is
+  about $0.0003 a question
 
 ---
 
@@ -945,6 +946,14 @@ python -m ai_race_engineer.evals diagnostic-trace.jsonl
 
 Add `--replay-model` to run the recorded questions through the currently
 configured model. That mode deliberately incurs normal LLM API cost.
+
+Check a model before trusting it with the radio — five questions that have
+caught real failures, each asked five times, a probe passing only if all five
+answers are clean. It calls the configured model and costs a few cents:
+
+```bash
+python -m ai_race_engineer.evals --floor 5
+```
 
 ### Architecture
 

@@ -32,6 +32,10 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   They are always added. A blank box now means the default prompt, and
   **Restore default prompt** brings back the shipped one. The default is
   half its old length, with rules the app already enforces taken out.
+- Natural-language pit commands ask the model for a fixed reply shape on
+  OpenRouter instead of relying on temperature 0. Claude Haiku 5.5 does not
+  take a temperature, and OpenRouter dropped it without saying so. The reply
+  is still parsed and checked exactly as before.
 
 ### Added
 
@@ -44,9 +48,18 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   including the ones meant to be loud because they had already failed in
   silence once. Only warnings and errors are kept. Your questions and the
   engineer's answers are not, so the exchange log still lives in memory only.
+- `python -m ai_race_engineer.evals --floor 5` — the model check as a command.
+  Five questions that reach the model, each asked five times on simulated
+  telemetry, each graded on every run being clean rather than the best one.
+  It calls the configured model, so it costs a few cents. `--effort` sends a
+  reasoning effort, to measure one before changing it.
 
 ### Fixed
 
+- With simulated telemetry, "how far am I behind Silva?" — any gap to a
+  named car — answered "I can't place you in the order right now". The
+  simulated field never said which car was yours. Live telemetry was not
+  affected.
 - An answer could be spoken with the model's own draft and its correction
   in it — "Wait, I need to keep that to one sentence" — read out between two
   versions of the answer. Only the final one is spoken now.
