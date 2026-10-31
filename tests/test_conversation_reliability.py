@@ -473,3 +473,53 @@ def test_a_replayed_answer_says_how_old_it_is():
     assert messages[1] == {"role": "user", "content": "[3 laps ago] Who's in front?"}
     assert messages[2] == {"role": "assistant", "content": "Rossi is a second up the road."}
     assert "[" not in messages[-1]["content"].split("Question:")[-1]
+
+
+_TALKING_TO_ITSELF = ('Wait, that exceeds my limit of one sentence at 25 words? Let me '
+                      'count: "Silva is five tenths quicker per lap on best laps." '
+                      "That's about 20 words, so it fits.")
+
+
+def test_a_note_to_itself_is_never_spoken():
+    """Live on Haiku 5.5, after a pace_compare call, as one paragraph — so
+    keeping the last paragraph kept all of it. Where a calculator ran, its
+    sentence stands in; where none did, "say again" beats reading it out."""
+    from ai_race_engineer import race_math
+    from ai_race_engineer.llm import NO_ANSWER
+    from ai_race_engineer.telemetry import Rival
+
+    snapshot = _leader_snapshot()
+    snapshot.car.best_lap_time = 91.2
+    snapshot.track.field.insert(1, Rival(name="Silva", car_number="16", position=2,
+                                         gap=1.5, best_lap=90.7))
+    client = _scripted([
+        {"finish_reason": "tool_calls", "message": {
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "pace_compare", "arguments": '{"target": "Silva"}'}}]}},
+        {"finish_reason": "stop", "message": {"content": _TALKING_TO_ITSELF}},
+    ])
+    answer = client.generate("How much quicker is Silva than me per lap?", snapshot)
+    assert answer == race_math.pace_compare(snapshot.car, snapshot.track, "Silva")["spoken"]
+
+    plain = _scripted([{"finish_reason": "stop", "message": {"content": _TALKING_TO_ITSELF}}])
+    plain._tools_unsupported = True
+    assert plain.generate("How much quicker is Silva?", snapshot) == NO_ANSWER
+
+
+def test_the_grader_catches_a_note_to_itself_and_no_calculator_trips_it():
+    from ai_race_engineer import race_math
+    from ai_race_engineer.evals import _floor_snapshot, grade_record
+    from ai_race_engineer.llm import SELF_TALK
+
+    record = {"question": "How much quicker is Silva?", "route": "tool:pace_compare",
+              "snapshot": {"session_type": "Race"}}
+    assert "answer is the model talking to itself" in grade_record(record, _TALKING_TO_ITSELF)
+    assert grade_record(record, "Silva is five tenths a lap quicker than you.") == []
+
+    snapshot = _floor_snapshot()
+    for schema in race_math.tool_schemas():
+        name = schema["function"]["name"]
+        args = {"target": "Silva"} if name in {"gap_to", "pace_compare", "driver_report"} else {}
+        spoken = race_math.dispatch(name, args, snapshot).get("spoken", "")
+        assert not SELF_TALK.search(spoken), (name, spoken)

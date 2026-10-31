@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from . import race_math
 from .config import AppConfig
-from .llm import _REASONING_EFFORT, COMMS_FAILURE, LLMClient, NO_ANSWER
+from .llm import _REASONING_EFFORT, COMMS_FAILURE, LLMClient, NO_ANSWER, SELF_TALK
 from .telemetry import TelemetrySnapshot, session_kind
 from .telemetry.simulated import SimulatedTelemetryAdapter
 from .text import normalise_question
@@ -107,6 +107,8 @@ def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[s
         failures.append("race-speed answer gives a time to the hundredth")
     if not finished and not in_race and re.search(r"\b\d+\.\d{3,}\s*seconds\b", spoken):
         failures.append("answer gives a time to the thousandth")
+    if SELF_TALK.search(spoken):
+        failures.append("answer is the model talking to itself")
     if re.search(r"\b[A-Z]\. [A-Z][a-z]", spoken):
         failures.append("rival named by initial instead of surname")
     return failures

@@ -73,6 +73,11 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+- The engineer could read out a note to itself: "Wait, that exceeds my
+  limit of one sentence at 25 words? Let me count…". Written as one
+  paragraph, it got past the check that keeps only the final draft. Where a
+  calculator was asked, its sentence is spoken instead; otherwise the
+  engineer asks you to say again. The model check grades it too.
 - Grading a practice or qualifying trace failed every time given to the
   hundredth, which the engineer says there on purpose. Only a race now
   fails a hundredth; practice and qualifying fail a thousandth.

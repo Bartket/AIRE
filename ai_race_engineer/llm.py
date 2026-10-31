@@ -63,6 +63,14 @@ _THINKING_TOKENS = 2048
 # subtracted lap times itself. Re-measure with `evals --floor 5 --effort` before
 # setting this for another model.
 _REASONING_EFFORT: Optional[str] = None
+# The model's notes to itself about its own answer. Haiku 5.5, live: "Wait,
+# that exceeds my limit of one sentence at 25 words? Let me count: … That's
+# about 20 words, so it fits." One paragraph, so keeping the last paragraph
+# did not remove it, and all of it would have been spoken. An engineer's
+# answer never talks about words or sentences.
+SELF_TALK = re.compile(
+    r"\blet me count\b|\b\d+\s+words\b|\bword (?:limit|count)\b"
+    r"|\bone sentence\b|\bmy limit\b", re.IGNORECASE)
 # The pit classifier's reply shape, enforced by the provider where it can be,
 # sent to OpenRouter only for the same reason as the reasoning setting. Strict
 # schemas need every field present, so a non-command carries an empty command.
@@ -308,6 +316,12 @@ class LLMClient:
         if not finished:
             text = _last_paragraph(text)
             text = _drop_vocative(text, self._driver_names(telemetry), question)
+            if SELF_TALK.search(text):
+                # No calculator ran to stand in for it. Silence is
+                # recoverable; a note to itself read out on air is not.
+                logger.error("Model %s answered with a note to itself: %r",
+                             self.model, text)
+                return NO_ANSWER
         if not text:
             # Reached the model, got nothing back. Saying "comms issues"
             # here points the driver — and whoever debugs it — at the
@@ -507,7 +521,7 @@ If the requested tyre type is not in that list, use ambiguous."""
 
             calls = message.get("tool_calls") or []
             if not calls:
-                return (message.get("content") or "").strip() or computed
+                return _spoken_or_computed(message.get("content"), computed)
 
             # The assistant turn must be replayed verbatim or the follow-up
             # request has tool results with nothing to attach them to.
@@ -541,8 +555,8 @@ If the requested tyre type is not in that list, use ambiguous."""
 
         # Out of rounds: ask once more with tools withheld so it must speak.
         logger.warning("Tool loop hit its limit; answering without tools")
-        return (self._chat(convo, max_tokens=self._reply_budget).strip()
-                or computed)
+        return _spoken_or_computed(
+            self._chat(convo, max_tokens=self._reply_budget), computed)
 
     # ── Request building ────────────────────────────────────────────
 
@@ -697,6 +711,17 @@ If the requested tyre type is not in that list, use ambiguous."""
 
     def close(self) -> None:
         self._client.close()
+
+
+def _spoken_or_computed(content: Optional[str], computed: str) -> str:
+    """The model's reply, or the calculator's sentence where the reply is
+    empty or the model talking to itself about its own answer."""
+    content = (content or "").strip()
+    if computed and SELF_TALK.search(_last_paragraph(content)):
+        logger.warning("Model answered with a note to itself; speaking the "
+                       "calculator instead: %r", content)
+        return computed
+    return content or computed
 
 
 def _current_lap(telemetry: Optional[TelemetrySnapshot]) -> Optional[int]:
