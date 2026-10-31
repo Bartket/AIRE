@@ -153,6 +153,10 @@ def _normalise(text: str) -> str:
     text = re.sub(r"\bwindshield\b", "windscreen", text)
     text = re.sub(r"\btear[ -]?off\b", "tearoff", text)
     text = re.sub(r"[^a-z0-9.,\s-]", " ", text)
+    # A full stop is speech recognition's, not the driver's, unless it is a
+    # decimal point. Kept, "…thirty litres." read as an unknown unit and every
+    # spoken "pit stop" command fell through to the model interpreter.
+    text = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", text)
     return " ".join(text.split())
 
 
@@ -270,7 +274,8 @@ def parse_pit_command(
     quantities sent to the SDK are also the quantities in ``summary``.
     """
     normal = _normalise(text)
-    match = re.match(r"^pit\s*stop\s+(.+)$", normal)
+    # "Pit stop, fast repair" — the comma is the recogniser's pause.
+    match = re.match(r"^pit\s*stop[\s,]+(.+)$", normal)
     if not match:
         return None
     body = match.group(1)

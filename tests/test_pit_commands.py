@@ -822,3 +822,30 @@ def test_only_an_explicit_false_waives_confirmation(tmp_path, monkeypatch):
         assert result["answer"].startswith("Confirm:"), value
         assert orch.telemetry.applied == [], value
     assert _DEFAULT_CONFIG["pit_commands"]["confirm_pit_stop_commands"] is True
+
+
+def test_the_recognisers_punctuation_does_not_send_pit_stop_to_the_model(
+        tmp_path, monkeypatch):
+    """Speech recognition punctuates: "Pit stop, fast repair." The grammar kept
+    full stops for decimals and so read "litres." as an unknown unit, and the
+    comma after "pit stop" failed the prefix — every spoken "pit stop" command
+    went through the model, so the deterministic path only ever worked typed."""
+    compounds = (PitTireCompound("Dry", 0), PitTireCompound("Wet", 1))
+    for spoken, typed in (
+        ("Pit stop four tyres and thirty litres.", "pit stop four tyres and thirty litres"),
+        ("Pit stop, fast repair.", "pit stop fast repair"),
+        ("Pit stop. Wet tires.", "pit stop wet tyres"),
+        ("Pit stop, four tires at 21 PSI, fuel 30 liters.",
+         "pit stop four tyres at 21 psi and fuel 30 litres"),
+    ):
+        assert parse_pit_command(spoken, compounds) == \
+            parse_pit_command(typed, compounds), spoken
+    assert parse_pit_command("Pit stop fuel 8.5 gallons.").commands == \
+        (PitCommand("fuel", 32),)
+
+    orch = _held(tmp_path, monkeypatch, confirm=False)
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("asked the model")))
+    result = asyncio.run(orch.ask("Pit stop, fast repair.", speak=False))
+    assert result["answer"] == "Pit stop set: fast repair."
