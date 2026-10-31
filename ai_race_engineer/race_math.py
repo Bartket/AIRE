@@ -26,6 +26,7 @@ import difflib
 import logging
 import math
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import car_names, pronounce
@@ -120,18 +121,65 @@ def full_spoken(result: Dict[str, Any]) -> str:
     return " ".join([headline, *clauses.values()])
 
 
-def _laptime(value: Optional[float]) -> str:
+def lap_digits(track: Optional[TrackConfig]) -> int:
+    """How precisely to say a lap time or a time difference in this session.
+
+    Thousandths were read aloud — "one thirty-one point five one five". In a
+    race a tenth is what an engineer says. In qualifying and practice the
+    hundredths are the difference between two drivers, so they stay; the
+    thousandths never helped anyone at speed. The prompt block reads this
+    too, so the model and the calculators cannot disagree on it.
+    """
+    return 1 if session_kind(getattr(track, "session_type", "")) == "race" else 2
+
+
+def radio_round(value: float, digits: int) -> float:
+    """The one rounding for anything said on the radio: half up, from the
+    thousandth.
+
+    A sentence and its own figures disagreed. 91.2 - 90.35 is 0.8500000000000085
+    and was said as "9 tenths", while the same delta stored as 0.85 is really
+    0.8499999… in binary and rounded to 0.8. Settling at the thousandth first —
+    finer than iRacing times anything — and rounding half up makes both 0.9.
+    """
+    settled = Decimal(str(round(float(value), 3)))
+    return float(settled.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
+
+
+def radio_precision(result: Any, track: Optional[TrackConfig]) -> Any:
+    """A result as the model should see it: every decimal at radio precision.
+
+    The model copies what it is handed. `spoken` said "85 hundredths of a
+    second" while `delta: 0.85` sat beside it, and "0.85 seconds" went out
+    on the radio in 6 of 20 runs. Rounded, not removed: the figure is still
+    there for a question the sentence does not answer.
+    """
+    digits = lap_digits(track)
+    if isinstance(result, float):
+        return radio_round(result, digits)
+    if isinstance(result, dict):
+        return {key: radio_precision(value, track) for key, value in result.items()}
+    if isinstance(result, list):
+        return [radio_precision(value, track) for value in result]
+    return result
+
+
+def _laptime(value: Optional[float], digits: int = 3) -> str:
     """Seconds -> m:ss.mmm. Duplicated from prompt_builder deliberately:
-    this module must be usable without importing the prompt layer."""
+    this module must be usable without importing the prompt layer.
+
+    Rounded before splitting, so 91.96 to a tenth is 1:32.0, not 1:31.10.
+    """
     if value is None:
         return "unknown"
+    value = radio_round(value, digits)
     if value < 60:
-        return f"{value:.3f}s"
-    minutes, seconds = divmod(float(value), 60)
-    return f"{int(minutes)}:{seconds:06.3f}"
+        return f"{value:.{digits}f}s"
+    minutes, seconds = divmod(value, 60)
+    return f"{int(minutes)}:{seconds:0{3 + digits}.{digits}f}"
 
 
-def _spoken_delta(value: float) -> str:
+def _spoken_delta(value: float, digits: int = 2) -> str:
     """A time difference written the way an engineer says it.
 
     Sub-second values are given in tenths or hundredths, never as a decimal
@@ -139,12 +187,19 @@ def _spoken_delta(value: float) -> str:
     the model read both aloud as "half a tenth", a tenfold error, while it
     handled "0.85 of a second" correctly as "eight tenths". Naming the unit
     the number is already counted in leaves no conversion to get wrong.
+
+    `digits` is `lap_digits`: in a race, a tenth.
     """
     value = abs(float(value))
     if value < 0.005:
         return "nothing"
-    if value >= 1:
-        return f"{value:.2f} seconds"
+    if digits == 1 and value < 0.95:
+        tenths = round(radio_round(value, 1) * 10)
+        if tenths == 0:
+            return "under a tenth"
+        return "a tenth of a second" if tenths == 1 else f"{tenths} tenths of a second"
+    if value >= 1 or digits == 1:
+        return f"{radio_round(value, digits):.{digits}f} seconds"
     hundredths = round(value * 100)
     if hundredths % 10 == 0:
         return f"{hundredths // 10} tenths of a second"
@@ -160,7 +215,7 @@ def _spoken_gap(seconds: float) -> str:
     radio sound read off a spreadsheet, and against the prompt's own rule of
     gaps to a tenth.
     """
-    value = round(abs(float(seconds)), 1)
+    value = radio_round(abs(float(seconds)), 1)
     if value < 0.1:
         return "under a tenth"
     if value < 1:
@@ -1139,7 +1194,7 @@ def gap_to(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]
     my_gap = 0.0 if me.position == 1 else me.gap
     their_gap = 0.0 if them.position == 1 else them.gap
     if my_gap is None or their_gap is None:
-        return _no(f"I've got no time on {them.describe()}.")
+        return _no(f"I've got no time on {_radio_rival_name(them, track)}.")
 
     delta = their_gap - my_gap
     ahead = delta < 0
@@ -1147,7 +1202,7 @@ def gap_to(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]
 
     if laps_apart:
         word = "ahead of" if laps_apart < 0 else "behind"
-        spoken = (f"{them.describe()} is P{them.position}, "
+        spoken = (f"{_radio_rival_name(them, track)} is P{them.position}, "
                   f"{_plural(abs(laps_apart), 'lap')} {word} you — "
                   f"the time gap doesn't mean anything across laps.")
         if context["traffic_description"]:
@@ -1161,10 +1216,10 @@ def gap_to(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]
     # lap-time difference between two cars that may never have been near
     # each other, so it has to be said as pace, not as track position.
     if _is_race(track):
-        spoken = (f"{them.describe()} is P{them.position}, {_spoken_delta(delta)} "
+        spoken = (f"{_radio_rival_name(them, track)} is P{them.position}, {_spoken_gap(delta)} "
                   f"{'ahead' if ahead else 'behind'}.")
     else:
-        spoken = (f"{them.describe()} is P{them.position}, {_spoken_delta(delta)} "
+        spoken = (f"{_radio_rival_name(them, track)} is P{them.position}, {_spoken_delta(delta, lap_digits(track))} "
                   f"{'quicker' if ahead else 'slower'} than you on best lap.")
     if them.in_pits:
         spoken += " They're in the pits."
@@ -1545,7 +1600,7 @@ def standings(car: CarTelemetry, track: TrackConfig,
         context = (_class_context(track, r) if not r.is_player else {
             "same_class_as_you": True, "class_speed": None,
             "position_rival": None, "traffic_description": ""})
-        who = r.name or (f"car {r.car_number}" if r.car_number else "unknown")
+        who = _radio_rival_name(r, track)
         entries.append({
             "position": r.position, "driver": r.name, "car_number": r.car_number,
             "class_position": r.class_position,
@@ -1593,19 +1648,19 @@ def fastest_lap(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
         return _no("No fastest lap has been set yet.")
 
     mine = car.best_lap_time
-    spoken = f"Fastest lap is {best.describe()} on {_laptime(best.best_lap)}"
+    spoken = f"Fastest lap is {_radio_rival_name(best, track)} on {_laptime(best.best_lap, lap_digits(track))}"
     delta = None
     if mine:
         delta = mine - best.best_lap
         if delta <= 0.001:
             spoken += " — that's you."
         else:
-            spoken += f"; you're {_spoken_delta(delta)} off on {_laptime(mine)}."
+            spoken += f"; you're {_spoken_delta(delta, lap_digits(track))} off on {_laptime(mine, lap_digits(track))}."
     else:
         spoken += "; you haven't set a clean lap yet."
 
     return _yes(spoken, driver=best.name, car_number=best.car_number,
-                lap_time=best.best_lap, lap_time_spoken=_laptime(best.best_lap),
+                lap_time=best.best_lap, lap_time_spoken=_laptime(best.best_lap, lap_digits(track)),
                 your_best=mine, delta=None if delta is None else round(delta, 3),
                 is_you=bool(mine and delta is not None and delta <= 0.001))
 
@@ -1623,7 +1678,7 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
     if them is None:
         return _no(f"I can't find {target} out there.")
     if not them.best_lap:
-        return _no(f"{them.describe()} hasn't set a time yet.")
+        return _no(f"{_radio_rival_name(them, track)} hasn't set a time yet.")
 
     mine = car.best_lap_time
     if not mine:
@@ -1644,11 +1699,11 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
     if closing and gap_seconds:
         laps_to_contact = gap_seconds / abs(per_lap)
 
-    margin = _spoken_delta(per_lap)
+    margin = _spoken_delta(per_lap, lap_digits(track))
     if abs(per_lap) < 0.02:
-        spoken = f"You and {them.describe()} are matched on pace, within a couple of hundredths."
+        spoken = f"You and {_radio_rival_name(them, track)} are matched on pace, within a couple of hundredths."
     elif per_lap > 0:
-        spoken = f"You are {margin} a lap quicker than {them.describe()}"
+        spoken = f"You are {margin} a lap quicker than {_radio_rival_name(them, track)}"
         if laps_to_contact:
             spoken += f" — about {_plural(laps_to_contact, 'lap')} to catch them."
         elif ahead is False:
@@ -1656,7 +1711,7 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
         else:
             spoken += "."
     else:
-        spoken = f"{them.describe()} is {margin} a lap quicker than you"
+        spoken = f"{_radio_rival_name(them, track)} is {margin} a lap quicker than you"
         if laps_to_contact:
             spoken += f" — they are on you in about {_plural(laps_to_contact, 'lap')}."
         elif ahead is True:
@@ -1705,8 +1760,8 @@ def driver_report(car: CarTelemetry, track: TrackConfig,
         return _no("I can't find that car in the timing screen.")
 
     me = _me(track)
-    bits = [f"{them.describe()} is P{them.position}" if them.position
-            else f"{them.describe()} has no lap time in yet, so no place on the"
+    bits = [f"{_radio_rival_name(them, track)} is P{them.position}" if them.position
+            else f"{_radio_rival_name(them, track)} has no lap time in yet, so no place on the"
                  f" timing screen"]
     if them.class_position and me and me.class_position \
             and them.class_position != them.position:
@@ -1728,13 +1783,13 @@ def driver_report(car: CarTelemetry, track: TrackConfig,
                     else "a different class to you")
 
     if them.last_lap:
-        bits.append(f"last lap {_laptime(them.last_lap)}")
+        bits.append(f"last lap {_laptime(them.last_lap, lap_digits(track))}")
     if them.best_lap:
-        bits.append(f"best {_laptime(them.best_lap)}")
+        bits.append(f"best {_laptime(them.best_lap, lap_digits(track))}")
     # Off their own best by a margin is the tell that something is wrong —
     # a flat spot, a mistake, or traffic.
     if them.last_lap and them.best_lap and them.last_lap - them.best_lap > 1.0:
-        bits.append(f"{_spoken_delta(them.last_lap - them.best_lap)} off their own best")
+        bits.append(f"{_spoken_delta(them.last_lap - them.best_lap, lap_digits(track))} off their own best")
 
     # Same tyre or not is answerable from the indices. The player's mapping
     # cannot safely name a rival's compound in a mixed-car field.
@@ -1811,16 +1866,16 @@ def sector_report(car: CarTelemetry, track: TrackConfig,
         theirs = them.sector_times or []
         if not theirs or all(t is None for t in theirs):
             return _no(f"I haven't got a full lap of sectors for "
-                       f"{them.describe()} yet.")
-        return _compare_sectors(mine, theirs, them.describe(), car)
+                       f"{_radio_rival_name(them, track)} yet.")
+        return _compare_sectors(mine, theirs, _radio_rival_name(them, track), car, track)
 
     bests = [t for t in (car.sector_bests or [])]
     if not bests or all(t is None for t in bests):
         return _no("I need a clean lap before I can tell you where you're losing it.")
-    return _compare_sectors(mine, bests, "your best", car, own_best=True)
+    return _compare_sectors(mine, bests, "your best", car, track, own_best=True)
 
 
-def _compare_sectors(mine, theirs, label, car, own_best=False):
+def _compare_sectors(mine, theirs, label, car, track, own_best=False):
     """Per-sector deltas, and the one that matters said out loud."""
     deltas = []
     for n in range(max(len(mine), len(theirs))):
@@ -1840,12 +1895,12 @@ def _compare_sectors(mine, theirs, label, car, own_best=False):
         spoken = (f"You're matching {label} everywhere — nothing in it."
                   if abs(total) < 0.05 else
                   f"You're up on {label} across the board, "
-                  f"{_spoken_delta(abs(total))} in hand.")
+                  f"{_spoken_delta(abs(total), lap_digits(track))} in hand.")
     else:
         spoken = (f"Sector {worst_n + 1} is costing you "
-                  f"{_spoken_delta(worst_d)} against {label}")
+                  f"{_spoken_delta(worst_d, lap_digits(track))} against {label}")
         if best_d < -0.02:
-            spoken += f", but you're {_spoken_delta(abs(best_d))} up in sector {best_n + 1}."
+            spoken += f", but you're {_spoken_delta(abs(best_d), lap_digits(track))} up in sector {best_n + 1}."
         else:
             spoken += "."
 
@@ -1968,20 +2023,20 @@ def pace_trend(car: CarTelemetry, track: TrackConfig,
     # would be true of the trend line and useless to the driver.
     if abs(slope) < 0.05 and spread > 1.5:
         verdict, spoken = "inconsistent", (
-            f"Lap times are all over the place — {_spoken_delta(spread)} between "
+            f"Lap times are all over the place — {_spoken_delta(spread, lap_digits(track))} between "
             f"your best and worst of the last {n}, with no clear trend.")
     # Below about five hundredths a lap is noise, not degradation.
     elif abs(slope) < 0.05:
         verdict, spoken = "stable", (
             f"Pace is holding — last {n} clean laps within "
-            f"{_spoken_delta(spread)} of each other.")
+            f"{_spoken_delta(spread, lap_digits(track))} of each other.")
     elif slope > 0:
         verdict, spoken = "degrading", (
-            f"You're losing {_spoken_delta(slope)} a lap over the last {n} clean laps, "
-            f"{_spoken_delta(first_last)} slower than {n} laps ago.")
+            f"You're losing {_spoken_delta(slope, lap_digits(track))} a lap over the last {n} clean laps, "
+            f"{_spoken_delta(first_last, lap_digits(track))} slower than {n} laps ago.")
     else:
         verdict, spoken = "improving", (
-            f"You're finding {_spoken_delta(slope)} a lap over the last {n} clean laps.")
+            f"You're finding {_spoken_delta(slope, lap_digits(track))} a lap over the last {n} clean laps.")
 
     return _yes(
         spoken,
@@ -2097,7 +2152,7 @@ def race_history(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
         if grid is None:
             bits.append("I haven't got a grid position for this one")
     if best is not None:
-        bits.append(f"best lap {_laptime(best.time)} on lap {best.lap}")
+        bits.append(f"best lap {_laptime(best.time, lap_digits(track))} on lap {best.lap}")
     laps_led = getattr(track, "laps_led", None)
     if laps_led:
         bits.append(f"you've led {_plural(laps_led, 'lap')}")

@@ -528,11 +528,14 @@ If the requested tyre type is not in that list, use ambiguous."""
                         return race_math.fuel_radio(result, question)
                     return result.get("spoken", "")
                 computed = result.get("spoken", "") or computed
+                # At radio precision, not the calculator's own: the model
+                # copies decimals it is handed onto the radio.
+                track = getattr(telemetry, "track", None)
                 convo.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", ""),
                     "name": name,
-                    "content": json.dumps(result),
+                    "content": json.dumps(race_math.radio_precision(result, track)),
                 })
 
         # Out of rounds: ask once more with tools withheld so it must speak.

@@ -1359,11 +1359,13 @@ def _laptime(value, digits: int = 3) -> str:
     as "1:12.188" instead of 1:52.188. Doing the arithmetic here removes the
     chance to fumble it.
 
-    Rounded before splitting, so 91.96 to a tenth is 1:32.0, not 1:31.10.
+    Rounded before splitting, so 91.96 to a tenth is 1:32.0, not 1:31.10 —
+    and rounded the way the calculators round, so the block and a tool never
+    give one lap two times.
     """
     if value is None:
         return UNKNOWN
-    value = round(float(value), digits)
+    value = race_math.radio_round(value, digits)
     if value < 60:
         return f"{value:.{digits}f}s"
     minutes, seconds = divmod(value, 60)
@@ -1372,14 +1374,9 @@ def _laptime(value, digits: int = 3) -> str:
 
 
 def _lap_digits(track) -> int:
-    """How precisely to give the model a lap time in this session.
-
-    Thousandths were read aloud — "one thirty-one point five one five". In a
-    race a tenth is what an engineer says. In qualifying and practice the
-    hundredths are the difference between two drivers, so they stay; the
-    thousandths never helped anyone at speed.
-    """
-    return 1 if session_kind(getattr(track, "session_type", "")) == "race" else 2
+    """How precisely to give the model a lap time: `race_math.lap_digits`,
+    one rule for the block and the calculators."""
+    return race_math.lap_digits(track)
 
 
 def _of(total) -> str:

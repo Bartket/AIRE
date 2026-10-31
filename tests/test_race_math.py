@@ -3298,3 +3298,76 @@ def test_every_rival_calculator_understands_ahead_and_behind():
 
     assert "Becker" in rm.gap_to(car, track, "ahead")["spoken"]
     assert "Novak" in rm.gap_to(car, track, "behind")["spoken"]
+
+
+# ── Radio wording on what the model reads ───────────────────────────
+
+_TARGETED = {"gap_to", "pace_compare", "driver_report"}
+
+
+def _every_result(snapshot):
+    """Every calculator's result on one snapshot, with a rival where one is needed."""
+    results = {}
+    for schema in rm.tool_schemas():
+        name = schema["function"]["name"]
+        args = {"target": "Silva"} if name in _TARGETED else {}
+        for kwargs in (_budget_arguments(name) if not args else [args]):
+            label = f"{name} {kwargs}" if kwargs else name
+            results[label] = rm.dispatch(name, kwargs, snapshot)
+    return results
+
+
+def _floor(session_type):
+    from ai_race_engineer.evals import _floor_snapshot
+
+    snapshot = _floor_snapshot()
+    snapshot.track.session_type = session_type
+    return snapshot
+
+
+def test_no_calculator_hands_the_radio_hundredths_or_a_roster_initial_in_a_race():
+    """The model reads these and rephrases them, and it copies what it is given.
+
+    On Claude Haiku 5.5 "how much quicker is Rossi" came back as "0.85
+    seconds" in 6 of 20 runs: the calculator's own sentence said "85
+    hundredths", but `delta: 0.85` sat beside it. gap_to said "4.39 seconds"
+    itself, fastest_lap read lap times to the thousandth, and rivals were
+    "M. Rossi (car 13)". In a race an engineer says a tenth and a surname.
+    """
+    import json
+    import re
+
+    snapshot = _floor("Race")
+    bad = []
+    for label, result in _every_result(snapshot).items():
+        spoken = result.get("spoken", "")
+        sent = json.dumps(rm.radio_precision(result, snapshot.track))
+        if re.search(r"\d+\.\d{2,}", spoken):
+            bad.append(f"{label} says hundredths: {spoken}")
+        if re.search(r"\b[A-Z]\. [A-Z][a-z]", spoken):
+            bad.append(f"{label} names a rival by initial: {spoken}")
+        if re.search(r"\d+\.\d{2,}", sent):
+            bad.append(f"{label} sends the model hundredths: {sent[:160]}")
+    assert not bad, "\n".join(bad)
+
+
+def test_practice_keeps_the_hundredths_that_separate_two_drivers():
+    """Outside a race the hundredths are the difference, so they stay."""
+    snapshot = _floor("Practice")
+    fastest = rm.dispatch("fastest_lap", {}, snapshot)
+
+    assert "1:30.35" in fastest["spoken"]
+    assert "1:30.350" not in fastest["spoken"]
+    assert rm.radio_precision(fastest, snapshot.track)["delta"] == 0.85
+
+
+def test_a_sentence_and_its_own_figures_round_the_same_way():
+    """fastest_lap said "9 tenths" while handing the model `delta: 0.8` — the
+    same 0.85, rounded once from 0.8500000000000085 and once from a binary
+    0.8499999…. One fact, two values, and the model free to pick either."""
+    snapshot = _floor("Race")
+    for name, args, field in (("fastest_lap", {}, "delta"),
+                              ("pace_compare", {"target": "Rossi"}, "pace_delta_per_lap")):
+        result = rm.radio_precision(rm.dispatch(name, args, snapshot), snapshot.track)
+        assert "9 tenths" in result["spoken"], (name, result["spoken"])
+        assert abs(result[field]) == 0.9, (name, result[field])

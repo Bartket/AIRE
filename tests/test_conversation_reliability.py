@@ -392,3 +392,33 @@ def test_the_app_leaves_reasoning_effort_to_the_model():
     local._client.post = post
     local._chat([{"role": "user", "content": "?"}])
     assert "reasoning" not in sent[-1]
+
+
+def test_the_model_is_handed_a_tool_result_at_radio_precision():
+    """The model copies what it is handed. pace_compare said "85 hundredths"
+    while `pace_delta_per_lap: -0.85` sat beside it, and "0.85 seconds" went
+    out on air in 6 of 20 runs on Claude Haiku 5.5. In a race the decimals
+    it reads are tenths, like everything else it says."""
+    import json
+    import re
+
+    snapshot = _leader_snapshot()
+    snapshot.car.best_lap_time = 91.2
+    snapshot.track.field[0].best_lap = 90.35
+    client = _scripted([
+        {"finish_reason": "tool_calls", "message": {
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {
+                "name": "pace_compare", "arguments": '{"target": "Rossi"}'}}]}},
+        {"finish_reason": "stop", "message": {"content": "Rossi's eight tenths quicker."}},
+    ])
+    sent = []
+    post = client._client.post
+    client._client.post = lambda url, json=None, **kw: (sent.append(json), post(url, json=json, **kw))[1]
+
+    client.generate("How much quicker is Rossi?", snapshot)
+
+    tool_turn = next(m for m in sent[-1]["messages"] if m.get("role") == "tool")
+    payload = json.loads(tool_turn["content"])
+    assert payload["pace_delta_per_lap"] == -0.9
+    assert not re.search(r"\d+\.\d{2,}", tool_turn["content"])
