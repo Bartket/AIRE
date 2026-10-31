@@ -964,6 +964,10 @@
                         <div v-for="(log, index) in exchangeLog.slice().reverse()" :key="index" class="log-entry">
                             <div class="log-header">
                                 <span class="log-time">{{ formatTime(log.timestamp) }}</span>
+                                <span class="log-session" v-if="log.session_kind"
+                                      :title="'iRacing session type: ' + (log.session_type || '(empty)')">
+                                    {{ log.session_type || '(no session type)' }} → {{ log.session_kind }}
+                                </span>
                                 <span class="log-source" :class="log.type">{{ log.type }}</span>
                             </div>
                             <div class="log-content">

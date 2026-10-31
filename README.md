@@ -357,7 +357,14 @@ iRacing reports as `Offline Testing` and which is treated as practice. In qualif
 best lap against the session best and your grid slot; in practice about
 consistency and what the tyre temperatures suggest. Fuel-to-the-finish and pit
 windows are race concepts, so it says so rather than inventing a race distance
-out of the session clock.
+out of the session clock. "How are we looking" is your place on lap time and how
+far off the best lap in your class you are, and the cars either side are traffic
+you are catching or being caught by, never a battle.
+
+Each entry in the exchange log shows the session type iRacing reported and how
+the engineer classified it. A type it does not recognise, or an empty one, is
+treated as a race — if a practice answer sounds like a race, that tag says which
+of the two happened.
 
 **After the flag**
 > How did that go? · Was I far off the win? · What should I work on?

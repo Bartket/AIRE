@@ -29,7 +29,7 @@ from .pit_commands import (PitCommandError, PitCommandPlan,
                            parse_pit_command, pit_amounts_match)
 from .prompt_builder import PromptBuilder
 from .stt import STT, STTError, Transcription, should_repeat
-from .telemetry import TelemetrySnapshot, create_telemetry_adapter
+from .telemetry import TelemetrySnapshot, create_telemetry_adapter, session_kind
 from .text import normalise_question
 from . import pronounce
 from .tts import TTS, TTSError
@@ -413,13 +413,24 @@ class Orchestrator:
     def history(self) -> List[Dict[str, Any]]:
         return list(self._history)
 
-    def _log_exchange(self, question: str, answer: str, kind: str = "voice") -> Dict[str, Any]:
+    def _log_exchange(self, question: str, answer: str, kind: str = "voice",
+                      snapshot: Optional[TelemetrySnapshot] = None) -> Dict[str, Any]:
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": kind,
             "question": question,
             "answer": answer,
         }
+        if snapshot is not None:
+            # Which session the answer was written for. A practice session
+            # answered like a race left no way to tell whether the wording
+            # was wrong or the session had been read as a race — and an
+            # unrecognised or empty type is classified as one by design.
+            # The raw string is kept beside the verdict so an empty reading
+            # shows as empty rather than as "race".
+            session_type = snapshot.track.session_type
+            entry["session_type"] = session_type
+            entry["session_kind"] = session_kind(session_type)
         self._history.append(entry)
         return entry
 
@@ -797,7 +808,7 @@ class Orchestrator:
             pit_result = await self._handle_pit_command(question)
             if pit_result is not None:
                 answer, route = pit_result
-                entry = self._log_exchange(question, answer, kind)
+                entry = self._log_exchange(question, answer, kind, snapshot)
                 self._write_diagnostic_trace(
                     question, answer, kind, snapshot, _transcription, route)
                 logger.info("Pit command route %s: %r", route, answer)
@@ -811,7 +822,7 @@ class Orchestrator:
 
             with self._timings.stage("llm"):
                 answer = await asyncio.to_thread(self.llm.generate, question, snapshot)
-            entry = self._log_exchange(question, answer, kind)
+            entry = self._log_exchange(question, answer, kind, snapshot)
             self._write_diagnostic_trace(
                 question, answer, kind, snapshot, _transcription,
                 self.llm.last_route)

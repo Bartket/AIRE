@@ -1239,7 +1239,10 @@ def _session_focus(track) -> str:
                 "about lap time consistency, whether the tyres are coming to them or "
                 "going away, what the temperatures suggest about the setup, and how "
                 "much session time is left. Position is by lap time, not by racing, "
-                "and there is no finish to reach.")
+                "and there is no finish to reach: no pit window, no fuel to the end, "
+                "no stop strategy. Cars near them are traffic, never rivals or "
+                "battles — say whether they will catch one or be caught, not who "
+                "is winning.")
     return ""
 
 

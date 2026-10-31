@@ -1207,6 +1207,27 @@ def _radio_rival_name(rival: Rival, track: Optional[TrackConfig] = None) -> str:
     return name if namesakes > 1 else surname
 
 
+def _best_to_beat(track: TrackConfig) -> Optional[Dict[str, Any]]:
+    """The best lap in the driver's own class, and what to call it.
+
+    `track.fastest_lap` is the whole field. In a multiclass session that is
+    a prototype's lap, and measuring a GT car against it would tell the
+    driver they are seconds off when they may be quickest in class.
+    """
+    field = [r for r in (track.field or []) if r.best_lap]
+    mine = getattr(track, "car_class_id", None)
+    multiclass = len({r.car_class_id for r in field
+                      if r.car_class_id is not None}) > 1
+    if multiclass:
+        if mine is None:
+            return None
+        field = [r for r in field if r.car_class_id == mine]
+    if not field:
+        return None
+    return {"lap": min(r.best_lap for r in field),
+            "label": "class best" if multiclass else "session best"}
+
+
 def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     """Current position with the physical battle gaps, not gap to the leader."""
     if _race_not_started(track):
@@ -1250,6 +1271,17 @@ def position_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
             adjacent.append(
                 f"{_radio_rival_name(car.behind, track)} "
                 f"{_spoken_gap(car.behind.gap)} behind")
+    else:
+        # A bare "You're P12." is a race answer: the order here is by lap
+        # time, and what the driver can act on is how far off the best lap
+        # they are, not the place.
+        bits[0] += " on lap time"
+        best = _best_to_beat(track)
+        if best is not None and car.best_lap_time:
+            what = best["label"]
+            delta = car.best_lap_time - best["lap"]
+            bits[0] += (f", that's the {what}" if delta <= 0.001
+                        else f", {_spoken_delta(delta)} off the {what}")
 
     # Two short sentences rather than a semicolon: the voice reads a
     # semicolon as a comma and runs the place into the first rival's name.
@@ -1435,7 +1467,23 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
                     contact_seconds=None, **context)
 
     closing = change > 0
-    if status == "early":
+    if not _is_race(track):
+        # Outside a race the car ahead is traffic, not a rival: "gaining on"
+        # and "pulling away" made a practice session sound like a battle.
+        # What matters is whether the driver is about to catch it or be
+        # caught, so the next lap is a clear one.
+        if direction == "ahead":
+            movement = (f"You're catching {who}" if closing
+                        else f"You're dropping back from {who}")
+        else:
+            movement = (f"{who} is catching you" if closing
+                        else f"You're pulling clear of {who}")
+        if status == "early":
+            spoken = f"{movement} right now, gap's {gap_words}."
+        else:
+            spoken = (f"{movement}, {_spoken_delta(abs(change))} just now. "
+                      f"Gap's {gap_words}.")
+    elif status == "early":
         if direction == "ahead":
             movement = (f"You're gaining on {who} right now" if closing
                         else f"{who} is edging away right now")

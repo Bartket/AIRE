@@ -20,6 +20,13 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   did in a third of answers, measured; it is kept for the debrief.
 - Lap times are given to the tenth in a race and to the hundredth in
   practice and qualifying, never to the thousandth.
+- Practice and qualifying no longer sound like a race. "How are we looking"
+  and "where am I" give your place on lap time and how far off the best lap
+  in your class you are ("You're P4 on lap time, 3 tenths of a second off the
+  session best") instead of a bare place. The cars either side are traffic
+  you are catching or being caught by, not rivals "pulling away", and the
+  engineer is told outright that practice has no pit window, no fuel to the
+  end and no battles.
 - The rules that stop the engineer inventing anything are no longer part of
   the System Prompt box, where clearing or rewriting it switched them off.
   They are always added. A blank box now means the default prompt, and
@@ -28,6 +35,10 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Added
 
+- Each exchange in the log shows the session type iRacing reported and what
+  the engineer took it for (e.g. `Practice → practice`). An unrecognised or
+  empty type is treated as a race on purpose, and until now nothing showed
+  when that had happened.
 - Warnings and errors are written to `aire.log` beside `config.json`.
   `AIRE.exe` has no console, so until now every one of them went nowhere,
   including the ones meant to be loud because they had already failed in
