@@ -175,7 +175,7 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
                               car_model_short="Porsche 911 Cup",
                               gap=None if i == 1 else round((i - 1) * 1.9 + math.sin(elapsed / 20 + i) * 0.4, 2),
                               best_lap=self._lap_time - 2.4 + i * 0.35,
-                              in_pits=(i == 7)))
+                              in_pits=(i == 7), is_player=(nm == "You")))
         fastest = min(grid, key=lambda r: r.best_lap)
 
         over = lap > self._race_laps

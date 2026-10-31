@@ -108,3 +108,18 @@ def test_the_grader_catches_an_answer_read_off_a_spreadsheet():
 def test_the_grader_passes_the_radio_wording():
     assert grade_record(_record(
         "You're P4. Rossi a second and a half ahead, Kowalski 2.2 seconds behind.")) == []
+
+
+def test_the_model_check_snapshot_only_holds_what_irsdk_publishes():
+    """The simulated race never marked which car was the driver, so every gap
+    to a named rival answered "I can't place you in the order" offline — and
+    the model check measured a refusal no real session gives. It also publishes
+    brake temperatures and live tyres, which iRacing does not out on track."""
+    from ai_race_engineer import race_math
+    from ai_race_engineer.evals import _floor_snapshot
+
+    snapshot = _floor_snapshot()
+
+    assert race_math.dispatch("gap_to", {"target": "Silva"}, snapshot)["available"]
+    assert snapshot.car.brake_fl_temp is None
+    assert snapshot.car.tyre_data_live is False
