@@ -264,7 +264,7 @@ def test_hints_stay_a_line_long():
 
 
 def test_sections_sit_on_the_tab_their_subject_belongs_to():
-    """Radio effect is audio processing, the speech cache and log size are
+    """Radio effect is audio processing, the speech cache and Radio Log settings are
     app housekeeping, and pit commands are not telemetry plumbing."""
     panel = PANEL.read_text(encoding="utf-8")
     sections = dict((title, tab) for tab, title in re.findall(
@@ -272,7 +272,7 @@ def test_sections_sit_on_the_tab_their_subject_belongs_to():
         panel))
     assert sections["Radio Effect"] == "audio"
     assert sections["Speech Cache"] == "app"
-    assert sections["Exchange Log"] == "app"
+    assert sections["Radio Log"] == "app"
     assert sections["Appearance"] == "app"
     assert sections["Pit Commands"] == "race"
     assert 'v-model="theme"' in panel.split('<h2>Appearance</h2>')[1].split("</section>")[0]
@@ -296,9 +296,19 @@ def test_the_status_bar_reads_what_is_running_not_what_is_saved():
     assert re.search(r"\bs\.hotkey\b(?!_)", _js_method("statusChecks"))
 
 
+def _status_bar(panel: str) -> str:
+    """The status block, by its own markers. It used to be sliced up to the
+    tab bar's </nav>, which stopped working when the bar moved below it in
+    the sidebar: the slice came back empty."""
+    start = panel.index('<div class="status-bar"')
+    bar = panel[start:panel.index("<!-- /status-bar -->", start)]
+    assert "status-pill" in bar and "engine-state" in bar, "status block is empty"
+    return bar
+
+
 def test_status_pills_take_you_to_the_tab_that_fixes_them():
     panel = PANEL.read_text(encoding="utf-8")
-    bar = panel[panel.index('<div class="status-bar">'):panel.index("</nav>")]
+    bar = _status_bar(panel)
     assert re.search(r'<button[^>]*class="status-pill"[^>]*\n?[^>]*@click="selectTab\(check\.tab\)"', bar, re.S)
 
 
@@ -306,9 +316,163 @@ def test_the_status_bar_speaks_plainly():
     """"STT", "TTS" and "irsdk" are this codebase's words, not the driver's —
     and STT and TTS were two red dots for one missing ElevenLabs key."""
     panel = PANEL.read_text(encoding="utf-8")
-    bar = panel[panel.index('<div class="status-bar">'):panel.index("</nav>")]
+    bar = _status_bar(panel)
     texts = re.findall(r"text: [`']([^`']*)[`']", _js_method("statusChecks"))
     labels = re.findall(r"label: '([^']*)'", _js_method("engineState"))
     assert texts and labels
     for shown in [bar, *texts, *labels]:
         assert not re.search(r"\b(STT|TTS|irsdk)\b", shown), shown
+
+
+def test_the_panel_asks_in_its_own_dialogs_not_the_browsers():
+    """A browser confirm box in the desktop window is drawn by the webview
+    and titled "127.0.0.1:9420 says" — a web page's prompt, in an app. The
+    profile delete and Restore all settings both used one."""
+    for source in (APP_JS, PANEL):
+        text = source.read_text(encoding="utf-8")
+        found = re.findall(r"\b(?:window\.)?(?:confirm|alert|prompt)\(", text)
+        assert not found, f"{source.name}: {found}"
+    assert "confirmDialog(" in APP_JS.read_text(encoding="utf-8")
+
+
+def test_every_tell_tale_has_an_icon_and_a_name():
+    """The status checks are icon tiles. An icon missing from the sprite
+    draws an empty tile that says nothing, and a tile with no accessible
+    name is a blank button to a screen reader."""
+    panel = PANEL.read_text(encoding="utf-8")
+    body = _js_method("statusChecks")
+    icons_block = body[body.index("const icons = {"):body.index("};", body.index("const icons = {"))]
+    named = set(re.findall(r"'([\w-]+)'", icons_block)) - {"controller"}
+    assert named, "no icons named in statusChecks()"
+    symbols = set(re.findall(r'<symbol id="i-([\w-]+)"', panel))
+    assert not named - symbols, f"icons missing from the sprite: {named - symbols}"
+
+    bar = _status_bar(panel)
+    assert ':aria-label="check.text"' in bar
+    assert "check.icon" in bar
+
+
+def test_the_pit_confirm_switch_reads_on_as_skip():
+    """The switch says "Skip confirmation", so on must store
+    confirm_pit_stop_commands = false. Bound straight to the setting, the
+    words and the behaviour would say opposite things about the one control
+    that changes the car without asking."""
+    panel = PANEL.read_text(encoding="utf-8")
+    toggle = re.search(r'<input type="checkbox" id="pit-confirm"[^>]*>', panel).group(0)
+    assert 'v-model="skipPitConfirm"' in toggle, toggle
+    assert "Skip confirmation" in panel.split('id="pit-confirm"')[1][:300]
+
+    app = APP_JS.read_text(encoding="utf-8")
+    block = app[app.index("    skipPitConfirm: {"):app.index("    },", app.index("    skipPitConfirm: {"))]
+    assert "confirm_pit_stop_commands === false" in block
+    assert "confirm_pit_stop_commands = !skip" in block
+
+
+def test_the_radio_log_is_a_page_with_search_and_export():
+    """It replaced a popup that showed twenty lines and could not be searched,
+    kept or sent anywhere."""
+    panel = PANEL.read_text(encoding="utf-8")
+    page = panel[panel.index('v-show="tab === \'log\'"'):]
+    page = page[:page.index("</section>")]
+    assert 'type="search"' in page and 'v-model="logQuery"' in page
+    assert '@click="openExport"' in page
+    assert "rate(e, 'down')" in page, "no way to mark a bad answer"
+    assert "showExchangeLog" not in panel, "the old popup is back"
+    app = APP_JS.read_text(encoding="utf-8")
+    assert "{ id: 'log'" in app
+    # The call itself: a comment mentioning the parameter passed this once.
+    assert "api(`/api/log?since_rev=${this.logRev}`)" in app, \
+        "the poll fetches the whole log again"
+
+
+def test_each_api_key_field_says_where_to_get_a_key():
+    panel = PANEL.read_text(encoding="utf-8")
+    llm = panel[panel.index('v-model="activeProvider.api_key"'):]
+    llm = llm[:llm.index("</div>")]
+    assert "https://openrouter.ai/settings/keys" in llm
+    assert "https://openrouter.ai/docs/api_reference/authentication" in llm
+
+    el = panel[panel.index('v-model="config.elevenlabs.api_key"'):]
+    el = el[:el.index("</div>")]
+    assert "https://elevenlabs.io/app/developers/api-keys" in el
+    assert "https://elevenlabs.io/docs/api-reference/authentication" in el
+
+
+def test_a_note_can_be_deleted_without_losing_the_rating():
+    panel = PANEL.read_text(encoding="utf-8")
+    assert 'aria-label="Delete note"' in panel and '@click="deleteNote(e)"' in panel
+    body = _js_method_async("deleteNote")
+    assert "this.sendFeedback(entry, this.rating(entry), '')" in body
+
+
+def test_testing_a_connection_saves_nothing():
+    """Test connection saved every setting first, so a test was also an
+    unannounced Save of whatever else had been changed."""
+    for name in ("testLLM", "testElevenLabs", "loadModels"):
+        assert "saveConfig" not in _js_method_async(name), name
+
+
+def test_the_pit_tell_tale_is_always_shown_and_green_when_on():
+    body = _js_method("statusChecks")
+    pit = body[body.index("if (!s.pit_commands_enabled)"):body.index("const icons")]
+    assert "text: 'Pit commands off', level: 'idle'" in pit
+    assert "text: 'Pit commands on', level: 'ok'" in pit
+
+
+def _js_method_async(name: str) -> str:
+    app = APP_JS.read_text(encoding="utf-8")
+    start = app.index(f"    async {name}(")
+    return app[start:app.index("\n    },\n", start)]
+
+
+def test_esc_closes_whichever_dialog_is_on_top():
+    """Handled on each dialog, Esc only worked once something inside it had
+    focus — after a click on the page behind, never."""
+    app = APP_JS.read_text(encoding="utf-8")
+    handler = app[app.index("this._onKeyDown = (e) => {"):]
+    handler = handler[:handler.index("\n    };")]
+    for closes in ("this.closeDialog(null)", "this.exportOpen = false",
+                   "this.showProfiles = false", "this.showAbout = false"):
+        assert closes in handler, closes
+
+
+def test_connection_results_are_toasts_not_panel_text():
+    """A result left on the page described settings that may since have
+    changed. A toast says it once and goes."""
+    panel = PANEL.read_text(encoding="utf-8")
+    assert "llmTestResult" not in panel and "elevenLabsTest" not in panel
+    for name in ("testLLM", "testElevenLabs"):
+        assert "this.notify(" in _js_method_async(name), name
+
+
+def test_the_clear_dialog_always_lists_every_choice():
+    """It used to leave out any choice that would remove nothing, so a fresh
+    log offered only "Everything" and the rest looked missing."""
+    app = APP_JS.read_text(encoding="utf-8")
+    choices = app[app.index("    clearChoices() {"):]
+    choices = choices[:choices.index("\n    },\n")]
+    for label in ("Older than an hour", "Older than a day", "Older than a week",
+                  "Older than 30 days", "Everything"):
+        assert f"label: '{label}'" in choices, label
+    returned = choices[choices.index("return ["):]
+    assert ".filter(" not in returned, "choices are filtered out again"
+    panel = PANEL.read_text(encoding="utf-8")
+    assert ':disabled="!c.count"' in panel, "an empty choice must show disabled"
+
+
+def test_a_toast_is_coloured_by_what_happened():
+    css = CSS.read_text(encoding="utf-8")
+    for kind in ("success", "error", "info"):
+        rule = re.search(rf"\.notification\.{kind}\s*\{{([^}}]*)\}}", css)
+        assert rule and "background" in rule.group(1), kind
+    success = re.search(r"\.notification\.success\s*\{([^}]*)\}", css).group(1)
+    base = re.search(r"\.notification\s*\{([^}]*)\}", css).group(1)
+    background = lambda rule: re.search(r"background:\s*([^;]+);", rule).group(1)
+    assert background(success) != background(base), "success looks like any other toast"
+    assert "className = `notification ${kind}`" in _js_method_notify()
+
+
+def _js_method_notify() -> str:
+    app = APP_JS.read_text(encoding="utf-8")
+    start = app.index("    notify(message")
+    return app[start:app.index("\n    },\n", start)]

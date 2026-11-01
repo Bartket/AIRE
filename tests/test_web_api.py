@@ -456,3 +456,123 @@ def test_a_slow_provider_does_not_stall_the_rest_of_the_app(
 
     assert code == 200
     assert waited < 0.3, f"/api/status waited {waited:.2f}s behind {path}"
+
+
+# ── Testing a connection saves nothing ──────────────────────────────────
+#
+# Test connection used to save every setting first. A test was also a
+# "Save" of whatever else had been changed, announced only by a toast.
+
+def test_the_llm_test_tries_the_panels_settings_and_saves_nothing(tmp_path, monkeypatch):
+    from ai_race_engineer import web_ui
+
+    seen = {}
+
+    def stub(self):
+        seen["model"] = self._config.llm_settings()["model"]
+        seen["key"] = self._config.llm_api_key()
+        return {"ok": True, "model": seen["model"], "reply": "ready"}
+
+    monkeypatch.setattr(web_ui.LLMClient, "test_connection", stub)
+    config = _config(tmp_path)
+    client = _client(config)
+
+    body = client.post("/api/llm/test", json={
+        "llm": {"provider": "openrouter", "openrouter": {"model": "test/unsaved", "api_key": ""}},
+    }).json()
+
+    assert body["model"] == "test/unsaved", "tested the saved model, not the one shown"
+    assert seen["key"] == OPENROUTER_KEY, "a blank key must mean the saved key"
+    assert config.llm_settings()["model"] != "test/unsaved"
+    assert not config.dirty and not config.path.exists(), "the test saved the settings"
+
+
+class _Heard:
+    def __init__(self, text):
+        self.text = text
+
+
+def _fake_elevenlabs_round_trip(monkeypatch, synthesize=None, heard="Radio check."):
+    from ai_race_engineer import stt as stt_module
+
+    def speak(self, text, regenerate=False):
+        self.last_from_cache = False
+        return b"\x01\x00" * 2400
+
+    monkeypatch.setattr(tts_module.TTS, "list_voices", lambda self: [{"id": "v"}])
+    monkeypatch.setattr(tts_module.TTS, "synthesize", synthesize or speak)
+
+    class FakeSTT:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe_raw_result(self, audio, filename="audio.wav", keyterms=None):
+            assert audio[:4] == b"RIFF", "recognition was not given the speech as WAV"
+            return _Heard(heard)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(stt_module, "STT", FakeSTT)
+
+
+def test_the_elevenlabs_test_checks_each_permission(tmp_path, monkeypatch):
+    _fake_elevenlabs_round_trip(monkeypatch)
+    config = _config(tmp_path)
+
+    body = _client(config).post("/api/elevenlabs/test", json={}).json()
+
+    assert body["ok"] is True
+    assert [(c["name"], c["ok"]) for c in body["checks"]] == [
+        ("Voices", True), ("Speech", True), ("Recognition", True)]
+    assert not config.path.exists()
+
+
+def test_a_key_without_speech_skips_recognition_and_says_why(tmp_path, monkeypatch):
+    def refuse(self, text, regenerate=False):
+        raise tts_module.TTSError("ElevenLabs TTS returned 401: missing_permissions text_to_speech")
+
+    _fake_elevenlabs_round_trip(monkeypatch, synthesize=refuse)
+    body = _client(_config(tmp_path)).post("/api/elevenlabs/test", json={}).json()
+
+    checks = {c["name"]: c for c in body["checks"]}
+    assert body["ok"] is False
+    assert checks["Voices"]["ok"] is True
+    assert checks["Speech"]["ok"] is False and "text_to_speech" in checks["Speech"]["detail"]
+    assert checks["Recognition"]["ok"] is False and "Skipped" in checks["Recognition"]["detail"]
+
+
+def test_recognition_must_hear_what_was_said(tmp_path, monkeypatch):
+    _fake_elevenlabs_round_trip(monkeypatch, heard="Thank you.")
+    body = _client(_config(tmp_path)).post("/api/elevenlabs/test", json={}).json()
+    assert body["checks"][-1]["ok"] is False
+
+
+def test_a_missing_permission_reads_as_a_sentence(tmp_path, monkeypatch):
+    """The point of testing a restricted key is learning which permission
+    it lacks; that sentence was buried in quoted JSON."""
+    def refuse(self, text, regenerate=False):
+        raise tts_module.TTSError(
+            'ElevenLabs TTS returned 401: {"detail":{"status":"missing_permissions",'
+            '"message":"The API key you used is missing the permission text_to_speech."}}')
+
+    _fake_elevenlabs_round_trip(monkeypatch, synthesize=refuse)
+    speech = _client(_config(tmp_path)).post("/api/elevenlabs/test", json={}).json()["checks"][1]
+
+    assert speech["detail"] == ("Key rejected — ElevenLabs TTS returned 401: "
+                                "The API key you used is missing the permission text_to_speech.")
+
+
+def test_a_wrong_openrouter_key_says_the_key_was_rejected(tmp_path, monkeypatch):
+    """OpenRouter answers a wrong key with "Missing Authentication header",
+    which reads as if no key had been sent at all."""
+    from ai_race_engineer import web_ui
+    from ai_race_engineer.llm import LLMError
+
+    def rejected(self):
+        raise LLMError("401 from https://openrouter.ai/api/v1/chat/completions: "
+                       "Missing Authentication header")
+
+    monkeypatch.setattr(web_ui.LLMClient, "test_connection", rejected)
+    body = _client(_config(tmp_path)).post("/api/llm/test", json={}).json()
+    assert body["error"].startswith("Key rejected — 401 from https://openrouter.ai")

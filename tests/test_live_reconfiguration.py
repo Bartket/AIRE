@@ -1,8 +1,8 @@
 """Settings that used to need a restart, and the calls that blocked the loop.
 
 `apply_config` re-applies STT, TTS, devices, the telemetry adapter and the
-hotkey. Three things it did not: the exchange-log length and the diagnostic
-trace length are both deque `maxlen`s fixed at construction, and the poll
+hotkey. Three things it did not: the exchange-log length (now the Radio
+Log's) and the diagnostic trace length were both fixed at construction, and the poll
 interval was read once before the `while`. Each showed the new value in the
 panel while the app kept using the old one, with nothing saying so.
 
@@ -27,39 +27,43 @@ def _orchestrator(**overrides):
     return Orchestrator(AppConfig(data))
 
 
-# ── Exchange log length ─────────────────────────────────────────────────
+# ── Radio Log length ────────────────────────────────────────────────────
 
-def test_a_longer_exchange_log_applies_without_a_restart():
-    orch = _orchestrator(memory_log=2)
-    assert orch._history.maxlen == 2
+def test_a_longer_radio_log_applies_without_a_restart():
+    orch = _orchestrator(radio_log={"keep": 100})
+    for n in range(150):
+        orch._log_exchange(f"q{n}", "copy")
+    assert len(orch.history()) == 100
 
-    orch.config.update({"memory_log": 25})
+    orch.config.update({"radio_log": {"keep": 500}})
     orch.apply_config()
+    for n in range(150, 250):
+        orch._log_exchange(f"q{n}", "copy")
 
-    assert orch._history.maxlen == 25
+    assert len(orch.history()) == 200
 
 
 def test_changing_the_log_length_keeps_the_exchanges_already_in_it():
     """Nobody resizing a log expects the entries to be the price."""
-    orch = _orchestrator(memory_log=20)
+    orch = _orchestrator(radio_log={"keep": 1000})
     orch._log_exchange("How's my fuel?", "Eight laps left in it.")
 
-    orch.config.update({"memory_log": 5})
+    orch.config.update({"radio_log": {"keep": 200}})
     orch.apply_config()
 
-    assert orch._history.maxlen == 5
     assert [entry["question"] for entry in orch.history()] == ["How's my fuel?"]
 
 
 def test_shrinking_the_log_keeps_the_newest_exchanges():
-    orch = _orchestrator(memory_log=20)
-    for lap in range(4):
+    orch = _orchestrator(radio_log={"keep": 1000})
+    for lap in range(150):
         orch._log_exchange(f"lap {lap}", "copy")
 
-    orch.config.update({"memory_log": 2})
+    orch.config.update({"radio_log": {"keep": 100}})
     orch.apply_config()
 
-    assert [entry["question"] for entry in orch.history()] == ["lap 2", "lap 3"]
+    questions = [entry["question"] for entry in orch.history()]
+    assert questions[0] == "lap 50" and questions[-1] == "lap 149"
 
 
 # ── Poll interval ───────────────────────────────────────────────────────

@@ -6,7 +6,65 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ## Unreleased
 
+### Added
+
+- **Driver profiles**, for a rig more than one person drives. The switcher at
+  the top of the sidebar swaps what belongs to a person: what the engineer
+  calls you, the system prompt, the voice and its delivery, pronunciations,
+  units, volume, the radio effect, push-to-talk hold or toggle, and pit
+  commands. API keys, the model, audio devices and the push-to-talk button
+  stay shared, so switching never logs anyone out or re-binds the wheel.
+  Profiles are files in `%APPDATA%\AIRE\profiles\`; nothing leaves the PC.
+  A switch waits while the engineer is talking or a pit command is waiting
+  for confirm.
+  Each profile has a badge — two letters and a colour from a preset
+  palette — and a new one gets a colour nobody else has. A new profile
+  starts on the shipped settings, not as a copy of whoever is driving.
+- **Radio Log**, a page of its own in place of the Exchange Log popup. Every
+  question, answer, warning and error in one timeline, searchable and
+  filterable, with how each answer was reached and how long it took. Rate
+  answers up or down and add a note, then **Export…** a `.zip` to attach to a
+  bug report — never containing an API key. Kept between runs in
+  `radio-log.jsonl` for 30 days and at most 1,000 entries, both adjustable
+  under **App → Radio Log**. **Clear…** removes everything or only entries
+  older than an hour, a day, a week or 30 days, showing how many each would
+  delete, and a note can be deleted without losing its rating. The exchange log used to vanish on exit.
+- **Test connection for ElevenLabs**, on the Voice tab. It lists your voices,
+  says "radio check" and hears it back, reporting each on its own, so a
+  restricted key shows which permission it is missing. A few characters of
+  speech and about a second of transcription per test.
+- Each API key field links to where the key is made, the provider's guide to
+  keys, and the setup steps in this README.
+- **Esc cancels Bind a key and Bind a button.** Both used to wait out fifteen
+  seconds with no way back, and the binding you had is kept.
+- **Home**, the view the panel now opens on: live readout, the ask box and
+  the last five exchanges. An answer typed there appears below it instead of
+  opening the exchange log.
+
 ### Changed
+
+- The panel is laid out like a desktop app: sections down a sidebar, the
+  readiness checks pinned along the top of every tab, and each setting's
+  name to the left of its control. Checkboxes are drawn as switches. The
+  readiness checks are icons lit like dashboard warning lamps — green when
+  ready or on, grey when off, amber or red when they want something — with
+  the detail on hover, so they fit on one line at any window width. Pit
+  commands always show, green when on.
+- **Test connection** (OpenRouter) tries what is on screen and saves nothing;
+  it used to save every setting first. **Browse models** likewise. Results
+  from both tests arrive as a notification rather than text left on the page;
+  a failure stays up long enough to read why.
+- The pit-commands switch is labelled **Enable pit commands**.
+- Deleting a profile and **Restore all settings** ask in the panel's own
+  dialog. The browser box they used was titled “127.0.0.1:9420 says” in the
+  desktop window.
+- Notifications stack instead of drawing over each other, and a repeated one
+  restarts rather than piling up. They are coloured by what happened — green
+  done, red failed, grey for news — each with an icon.
+- **Save Settings** is no longer a permanent button. A bar appears when
+  something differs from what is saved, with **Save** and **Discard**.
+  Binding a key or wheel button, or resetting a section, no longer throws
+  away unsaved edits elsewhere in the panel.
 
 - “Is the car behind catching me?” is now answered with a lap count to the
   flag rather than only the last few corners' trend. “Am I gaining?” and
@@ -111,8 +169,8 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   `speech-cache\rejected\` (the last 20, as WAV with the text sent beside
   it) instead of being deleted, so a rare garbled word can be traced to a
   respelling or to the voice model.
-- **Ask me to confirm “pit stop …” commands**, on the Race tab, on by
-  default. Off, a command starting with *pit stop* is set as soon as it is
+- **Skip confirmation for “pit stop …” commands**, on the Race tab, off by
+  default. On, a command starting with *pit stop* is set as soon as it is
   spoken and read back as set, even when the model had to interpret the
   wording. Commands without the *pit stop* prefix are always confirmed. The panel now shows the
   *pit stop* form with examples, alongside the confirm and cancel words.
@@ -320,6 +378,13 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 - Token counters per exchange in the diagnostic trace, including prompt-cache
   reads and writes, so the cost of a question is a reading rather than an
   estimate.
+
+### Removed
+
+- **Voice → Say it like this**, the panel's editor for respelling names. The
+  automatic handling — accents folded, risky names spoken as car numbers —
+  covers what it was for. A respelling can still be added to `config.json`,
+  and any already there keep working.
 
 ## 0.2.0
 

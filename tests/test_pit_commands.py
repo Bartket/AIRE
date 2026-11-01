@@ -473,7 +473,8 @@ def test_commands_ship_off_and_the_ui_names_the_risk(tmp_path):
     panel = (Path(__file__).resolve().parent.parent
              / "ai_race_engineer" / "static" / "ui" / "panel.html").read_text(encoding="utf-8")
     assert 'v-model="config.pit_commands.enabled"' in panel
-    assert "at my own risk" in panel
+    # A plain option label: the hint below it says what it does.
+    assert '<label for="pit-commands">Enable pit commands</label>' in panel
     # The exact form is shown, and so is the fact that it is not the only one.
     assert "<em>pit stop four tyres and 30 litres</em>" in panel
     assert "Your own phrasing" in panel

@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .input_handler import CaptureCancelled
+
 logger = logging.getLogger("race-engineer")
 
 # Must be set before pygame is imported, or SDL tries to open a window.
@@ -279,7 +281,24 @@ class ControllerHub:
             event.wait(timeout=timeout)
         finally:
             self._capture = None
+        if result and result[0] is None:
+            raise CaptureCancelled()
         return result[0] if result else None
+
+    def cancel_capture(self) -> bool:
+        """Wake a waiting `capture_next_press` as cancelled.
+
+        A wheel cannot send Esc, so the panel calls this when Esc is pressed
+        there. Returns whether a capture was waiting.
+        """
+        capture = self._capture
+        if capture is None:
+            return False
+        event, result = capture
+        if not event.is_set():
+            result.append(None)
+            event.set()
+        return True
 
 
 def _safe_guid(joy) -> str:

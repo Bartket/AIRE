@@ -37,6 +37,10 @@
   --surface: #1B1F28;
   --surface-raised: #222732;
   --surface-sunken: #12151B;
+  /* The sidebar sits a step below the page, so the content reads as the
+     thing in front. */
+  --sidebar-bg: #101318;
+  --nav-hover: rgba(255, 255, 255, 0.05);
 
   /* Text. Pure white on near-black is the classic eye-strain pairing. */
   --text: #D8DEE7;
@@ -100,6 +104,8 @@
   --surface: #FFFFFF;
   --surface-raised: #FFFFFF;
   --surface-sunken: #F5F7FA;
+  --sidebar-bg: #FFFFFF;
+  --nav-hover: rgba(16, 20, 28, 0.05);
 
   --text: #1C2029;
   --text-muted: #5B6472;
@@ -139,6 +145,8 @@
     --surface: #FFFFFF;
     --surface-raised: #FFFFFF;
     --surface-sunken: #F5F7FA;
+  --sidebar-bg: #FFFFFF;
+  --nav-hover: rgba(16, 20, 28, 0.05);
 
     --text: #1C2029;
     --text-muted: #5B6472;
@@ -204,40 +212,18 @@ body {
      attempts at this bug fixed things the content was doing, and the
      content was never what decided the width. */
   width: 100%;
-  max-width: 1200px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: var(--spacing-md);
+  padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-lg);
+  /* Lets the setting rows switch to one column on the width of this
+     column, not the window's — the sidebar takes a fixed share of it. */
+  container-type: inline-size;
 }
 
 .settings-panel {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-}
-
-/* Header */
-.settings-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--spacing-md) 0;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: var(--spacing-lg);
-}
-
-.settings-header h1 {
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
-
-.settings-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 /* Buttons */
@@ -798,76 +784,8 @@ input[type="range"]:focus-visible {
   color: var(--text);
 }
 
-/* Exchange Log */
-.exchange-log {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.log-entry {
-  background: var(--background);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-}
-
-.log-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--spacing-sm);
-  font-size: 0.8rem;
-}
-
 .log-time {
   color: var(--text-muted);
-}
-
-.log-session {
-  color: var(--text-muted);
-  margin-left: auto;
-  margin-right: var(--spacing-sm);
-}
-
-.log-source {
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
-}
-
-.log-source.question {
-  background: var(--brand-soft);
-  color: var(--primary);
-}
-
-.log-source.answer {
-  background: rgba(40, 167, 69, 0.2);
-  color: var(--success);
-}
-
-.log-content p {
-  margin-bottom: var(--spacing-xs);
-  color: var(--text);
-}
-
-.log-buttons {
-  display: flex;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-sm);
-}
-
-.log-buttons button {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--secondary);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.8rem;
-}
-
-.log-buttons button:hover {
-  background: var(--secondary-hover);
 }
 
 /* About Modal */
@@ -898,16 +816,6 @@ input[type="range"]:focus-visible {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .settings-header {
-    flex-direction: column;
-    gap: var(--spacing-md);
-  }
-  
-  .settings-controls {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  
   .voice-grid {
     grid-template-columns: 1fr;
   }
@@ -1003,31 +911,35 @@ input[type="range"]:focus-visible {
   margin-left: auto;
 }
 
-/* A check is a button: it takes you to the tab that fixes it. */
+/* A check is a button: it takes you to the tab that fixes it. Drawn as a
+   tell-tale — an icon tile lit by its state, like a warning lamp on a dash:
+   an outline when fine, a solid tint when it wants something, a glow when
+   it is waiting on you. The words are in the tooltip below. */
 .status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 22rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  background: var(--surface-raised);
-  color: var(--text-muted);
+  background: transparent;
+  color: color-mix(in srgb, var(--level) 85%, transparent);
   font: inherit;
   cursor: pointer;
   transition: var(--transition-smooth);
 }
 
-.status-pill .status-text {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.status-pill .icon {
+  width: 18px;
+  height: 18px;
 }
 
 .status-pill:hover {
-  color: var(--text);
   border-color: var(--border-strong);
+  background: var(--nav-hover);
 }
 
 .status-pill:focus-visible {
@@ -1035,10 +947,78 @@ input[type="range"]:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
+.status-pill.idle {
+  color: var(--text-faint);
+}
+
 .status-pill.setup,
 .status-pill.bad {
+  color: var(--level);
+  background: color-mix(in srgb, var(--level) 20%, transparent);
+  border-color: color-mix(in srgb, var(--level) 55%, transparent);
+}
+
+.status-pill.bad {
+  background: color-mix(in srgb, var(--level) 28%, transparent);
+  border-color: var(--level);
+}
+
+.status-pill.setup:hover,
+.status-pill.bad:hover {
+  background: color-mix(in srgb, var(--level) 30%, transparent);
+}
+
+/* Waiting on you — a pit command to confirm. */
+.status-pill.pulse {
+  animation: tell-tale-glow 1.1s ease-in-out infinite;
+}
+
+@keyframes tell-tale-glow {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--level) 30%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-pill.pulse { animation: none; }
+}
+
+/* Tooltip, shown at once rather than after the webview's one-second title
+   delay. Right-aligned under the tile so the last one stays on screen. */
+.tell-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease;
+}
+
+.tell-tip strong {
   color: var(--text);
-  border-color: color-mix(in srgb, var(--level) 45%, transparent);
+  font-weight: 600;
+}
+
+.status-pill:hover .tell-tip,
+.status-pill:focus-visible .tell-tip {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* A form-group laid out horizontally. `.form-group` sets column
@@ -1078,13 +1058,47 @@ input[type="range"]:focus-visible {
   gap: var(--spacing-sm);
 }
 
+/* Drawn as a switch: every checkbox here turns something on or off, and a
+   switch says that where a tick box says "agree". Still a real checkbox, so
+   the keyboard, the label and v-model all work as before. */
 .form-group input[type="checkbox"] {
-  width: 17px;
-  height: 17px;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
   flex: none;
   margin: 0;
-  accent-color: var(--primary);
+  border-radius: 999px;
+  background: var(--border-strong);
   cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.form-group input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.form-group input[type="checkbox"]:checked {
+  background: var(--primary);
+}
+
+.form-group input[type="checkbox"]:checked::before {
+  transform: translateX(14px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-group input[type="checkbox"],
+  .form-group input[type="checkbox"]::before { transition: none; }
 }
 
 .form-toggle label {
@@ -1095,7 +1109,7 @@ input[type="range"]:focus-visible {
 /* Keep a toggle's explanation visibly attached to that toggle. */
 .form-toggle.with-hint {
   display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
+  grid-template-columns: 34px minmax(0, 1fr);
   column-gap: var(--spacing-sm);
   row-gap: var(--spacing-xs);
 }
@@ -1178,12 +1192,31 @@ input[type="range"]:focus-visible {
 }
 
 /* Toast notifications. */
-.notification {
+/* Top right: the unsaved-changes bar owns the bottom, and a toast there
+   sat on its Save button for three seconds after every save. One stack,
+   so a quick run of toasts lines up instead of drawing on top of itself. */
+.toasts {
   position: fixed;
+  /* Clear of the pinned status bar, which a toast at 20px covered. */
+  top: 72px;
   right: 20px;
-  bottom: 20px;
   z-index: 2000;
-  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+  max-width: min(420px, calc(100vw - 40px));
+  pointer-events: none;
+}
+
+/* Coloured by what happened: green done, red failed, neutral for news that
+   is neither. Fixed deep shades rather than theme tokens, so white text
+   reads the same on a light panel as on a dark one. */
+.notification {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 16px 10px 12px;
   border-radius: var(--radius-sm);
   background: rgba(20, 22, 28, 0.95);
   border: 1px solid var(--border-color);
@@ -1192,9 +1225,25 @@ input[type="range"]:focus-visible {
   animation: notify-in 0.25s ease-out;
 }
 
+.notification .icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+.notification.success {
+  background: rgba(22, 120, 72, 0.96);
+  border-color: rgba(120, 230, 170, 0.45);
+}
+
 .notification.error {
-  background: rgba(190, 40, 50, 0.95);
+  background: rgba(190, 40, 50, 0.96);
   border-color: rgba(255, 120, 120, 0.5);
+}
+
+.notification.info {
+  background: rgba(20, 22, 28, 0.95);
+  border-color: var(--border-strong);
 }
 
 .notification.fade-out { animation: notify-out 0.3s ease-out forwards; }
@@ -1271,48 +1320,42 @@ input[type="range"]:focus-visible {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-/* Wordmark: outlined lettering in the logo's white, not the heading blue.
-   The height is the cap height, matched to the 1.65rem Inter it replaced. */
-.brand-text h1 {
-  margin: 0;
+/* Wordmark: outlined lettering in the logo's white, not the heading blue. */
+.brand-mark {
   line-height: 0;
   color: var(--text);
 }
 
 .brand-text .wordmark {
   display: block;
-  height: 1.2rem;
+  height: 1rem;
   width: auto;
-  /* Outlines have no descender space, so replace what the old line box gave. */
-  margin-bottom: 0.28rem;
 }
 
 .brand-sub {
-  margin: 6px 0 0;
-  font-size: 0.72rem;
+  margin: 5px 0 0;
+  font-size: 0.64rem;
   letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--text-muted);
   opacity: 0.75;
 }
 
-/* Tabs — the panel is long enough that one scroll buries the settings
-   you only touch during a race. */
+/* Sections — the panel is long enough that one scroll buries the
+   settings you only touch during a race. A vertical list, so a label never
+   has to be squeezed to fit seven across. */
 .tab-bar {
   display: flex;
-  gap: 4px;
-  margin-bottom: var(--spacing-lg);
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tab {
-  flex: 1 1 auto;
-  min-width: 86px;
-  padding: var(--spacing-sm) var(--spacing-md);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1320,26 +1363,41 @@ input[type="range"]:focus-visible {
   font-family: var(--font-main);
   font-size: 0.9rem;
   font-weight: 500;
+  text-align: left;
   cursor: pointer;
   transition: var(--transition-smooth);
   white-space: nowrap;
+  position: relative;
 }
 
 .tab:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--nav-hover);
   color: var(--text);
 }
 
+/* Tinted, not filled: a slab of brand orange in the corner of the eye is
+   the loudest thing on screen, and where you are is not that important. */
 .tab.active {
-  background: var(--primary);
-  color: var(--primary-text);
+  background: var(--brand-soft);
+  color: var(--text);
   font-weight: 600;
 }
 
-@media (max-width: 700px) {
-  .settings-header { flex-direction: column; align-items: flex-start; gap: var(--spacing-md); }
-  .brand-logo { width: 38px; height: 38px; }
+.tab.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
 }
+
+.tab.active .icon {
+  color: var(--brand);
+}
+
 
 
 /* ─────────────────────────────────────────────────────────────────
@@ -1474,19 +1532,77 @@ code {
 
 /* Voice-settings guidance: a short explainer plus one-click presets, so a
    stuttering voice is a two-second fix rather than a slider hunt. */
+/* A tip, not a warning: blue, and only as tall as its sentence and the
+   preset buttons. */
 .callout {
-    background: var(--brand-soft);
-    border: 1px solid var(--brand-line);
-    border-left: 3px solid var(--brand);
+    background: color-mix(in srgb, var(--info) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+    border-left: 3px solid var(--info);
     border-radius: 8px;
-    padding: 0.9rem 1rem;
-    margin-bottom: 1.4rem;
-    font-size: 0.87rem;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: var(--spacing-lg);
+    font-size: 0.85rem;
     line-height: 1.5;
+}
+
+.callout > strong:first-child {
+    color: var(--info);
+}
+
+.callout .preset-row {
+    margin: 0.6rem 0 0;
+}
+
+.callout .hint {
+    margin-top: 0.5rem;
 }
 
 .callout .hint {
     margin-bottom: 0;
+}
+
+/* Clear the Radio Log: a list of choices, each with what it would remove. */
+.clear-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--spacing-lg);
+}
+
+.clear-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  cursor: pointer;
+}
+
+.clear-choice input {
+  margin: 0;
+  accent-color: var(--danger);
+}
+
+.clear-choice.on {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.clear-choice.off {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.clear-label {
+  flex: 1;
+}
+
+.clear-count {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .preset-row {
@@ -1513,4 +1629,1292 @@ code {
   font-family: var(--font-mono);
   font-size: 0.85rem;
   color: var(--text);
+}
+
+
+/* ─────────────────────────────────────────────────────────────────
+   App shell: sidebar, page header, setting rows, Home, save bar,
+   profiles.
+   ───────────────────────────────────────────────────────────────── */
+
+.icon-sprite {
+  display: none;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  width: 100%;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) 12px var(--spacing-md);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
+}
+
+.sidebar .brand {
+  gap: 10px;
+  padding: 0 6px;
+}
+
+.sidebar .brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+/* Profile switcher */
+.profile-switch {
+  position: relative;
+}
+
+.profile-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.profile-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.profile-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.avatar {
+  --badge: var(--brand);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--badge) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--badge) 50%, transparent);
+  color: var(--badge);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.avatar.large {
+  width: 48px;
+  height: 48px;
+  font-size: 1rem;
+}
+
+.profile-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.profile-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.profile-caption {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.profile-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.sidebar-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+}
+
+.side-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.4rem 0.7rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.side-link .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.side-link:hover {
+  background: var(--nav-hover);
+  color: var(--text);
+}
+
+.side-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Page header */
+.page-header {
+  margin-bottom: var(--spacing-lg);
+}
+
+.page-header h1 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.page-header p {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Setting rows: what it is on the left, the control on the right, the
+   way a desktop app lays out its preferences. Only rows that have a label
+   — toggles, button strips and the bandpass pair keep their own layout. */
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  column-gap: var(--spacing-lg);
+  row-gap: 0;
+  align-items: start;
+  margin-bottom: var(--spacing-lg);
+}
+
+/* The label spans every row the field uses. Row gap is zero because each
+   row it spans would otherwise add one, empty rows included. */
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > label {
+  grid-column: 1;
+  grid-row: span 12;
+  padding-top: 0.45rem;
+  color: var(--text);
+}
+
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > :not(label) {
+  grid-column: 2;
+}
+
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > :not(label) + :not(label) {
+  margin-top: 6px;
+}
+
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > .btn,
+.settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > button {
+  justify-self: start;
+}
+
+/* The bandpass pair sits side by side inside one row; stacked inside it. */
+.settings-section .filter-controls .form-group:has(> label) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-bottom: 0;
+}
+
+.settings-section .filter-controls .form-group > label {
+  grid-row: auto;
+  padding-top: 0;
+  color: var(--text-muted);
+}
+
+.settings-section .filter-controls .form-group > :not(label) + :not(label) {
+  margin-top: 0;
+}
+
+@container (max-width: 640px) {
+  .settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-xs);
+  }
+
+  .settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > label {
+    padding-top: 0;
+  }
+
+  .settings-section .form-group:has(> label):not(.form-toggle):not(.inline-row) > :not(label) + :not(label) {
+    margin-top: 0;
+  }
+}
+
+.settings-section h2 {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* A note standing on its own in a section — "audio unavailable", the
+   simulated-telemetry warning — needs room before the field it is about. */
+.settings-section > .hint:not(:last-child) {
+  margin-bottom: var(--spacing-md);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-icon .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.icon-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--nav-hover);
+  color: var(--text);
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Home */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.stat span {
+  flex-basis: 100%;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.stat strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-size: 1.2rem;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat em {
+  font-style: normal;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.radio-feed {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--spacing-md);
+}
+
+.radio-feed li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--spacing-md);
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.radio-feed li:last-child {
+  border-bottom: none;
+}
+
+.radio-feed .log-time {
+  padding-top: 1px;
+  font-size: 0.78rem;
+}
+
+.feed-you {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.feed-engineer {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.feed-engineer::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 8px 2px 0;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+/* Unsaved-changes bar */
+.save-bar {
+  position: sticky;
+  bottom: var(--spacing-md);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
+  padding: 0.6rem 0.75rem 0.6rem 1rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: notify-in 0.2s ease-out;
+}
+
+.save-bar-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.save-bar-text .status-dot {
+  background: var(--warning);
+}
+
+.save-bar-profile {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-bar { animation: none; }
+}
+
+/* Profiles modal */
+.profiles-modal {
+  max-width: 560px;
+}
+
+.profiles-modal > .hint {
+  margin-bottom: var(--spacing-md);
+}
+
+.profile-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--spacing-md);
+}
+
+.profile-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-height: 44px;
+  padding: 6px 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.profile-list input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+}
+
+.profile-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.new-profile {
+  margin-bottom: var(--spacing-xs);
+}
+
+/* Sized by its buttons: "Clear…" offers up to four, and squeezed into a
+   fixed 460px their labels broke onto three lines each. */
+.confirm-modal {
+  width: auto;
+  min-width: min(460px, 92vw);
+  max-width: min(640px, 92vw);
+}
+
+.confirm-modal p {
+  margin-bottom: var(--spacing-lg);
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}
+
+.confirm-actions .btn {
+  white-space: nowrap;
+}
+
+/* A browser narrower than the desktop window's minimum: the sidebar
+   becomes a header and the sections scroll sideways. */
+@media (max-width: 760px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    /* A grid item will not shrink below its content without this, so the
+       scrolling section row pushed the whole page wider than the screen. */
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .tab-bar {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .tab {
+    width: auto;
+  }
+
+  .tab.active::before {
+    display: none;
+  }
+
+  .app-container {
+    padding: var(--spacing-md);
+  }
+
+}
+
+
+/* ─────────────────────────────────────────────────────────────────
+   Round 2: pinned status bar, profile badges, the switcher menu,
+   confirmations.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Pinned across the top of the content column, on every tab. The negative
+   margins cancel the column's padding so the bar runs its full width and
+   nothing scrolls past its edges. */
+.app-container > .status-bar {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  margin: calc(-1 * var(--spacing-xl)) calc(-1 * var(--spacing-xl)) var(--spacing-lg);
+  padding: 12px var(--spacing-xl);
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+  backdrop-filter: blur(8px);
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+}
+
+/* Badge colours, by the names profiles.COLORS stores. Brighter on dark,
+   deeper on light, so the initials stay readable in either. */
+.badge-orange { --badge: var(--brand); }
+.badge-red    { --badge: #F87171; }
+.badge-amber  { --badge: #FBBF24; }
+.badge-green  { --badge: #4ADE80; }
+.badge-teal   { --badge: #2DD4BF; }
+.badge-blue   { --badge: #60A5FA; }
+.badge-violet { --badge: #A78BFA; }
+.badge-pink   { --badge: #F472B6; }
+.badge-slate  { --badge: #94A3B8; }
+
+:root[data-theme="light"] .badge-red    { --badge: #DC2626; }
+:root[data-theme="light"] .badge-amber  { --badge: #B45309; }
+:root[data-theme="light"] .badge-green  { --badge: #15803D; }
+:root[data-theme="light"] .badge-teal   { --badge: #0F766E; }
+:root[data-theme="light"] .badge-blue   { --badge: #1D4ED8; }
+:root[data-theme="light"] .badge-violet { --badge: #6D28D9; }
+:root[data-theme="light"] .badge-pink   { --badge: #BE185D; }
+:root[data-theme="light"] .badge-slate  { --badge: #475569; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .badge-red    { --badge: #DC2626; }
+  :root:not([data-theme]) .badge-amber  { --badge: #B45309; }
+  :root:not([data-theme]) .badge-green  { --badge: #15803D; }
+  :root:not([data-theme]) .badge-teal   { --badge: #0F766E; }
+  :root:not([data-theme]) .badge-blue   { --badge: #1D4ED8; }
+  :root:not([data-theme]) .badge-violet { --badge: #6D28D9; }
+  :root:not([data-theme]) .badge-pink   { --badge: #BE185D; }
+  :root:not([data-theme]) .badge-slate  { --badge: #475569; }
+}
+
+/* The switcher menu */
+.profile-menu {
+  top: calc(100% + 6px);
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  animation: menu-in 0.14s ease-out;
+  transform-origin: top center;
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-menu { animation: none; }
+}
+
+.profile-menu-title {
+  padding: 6px 10px 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.profile-menu-item,
+.profile-menu-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.profile-menu-item {
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.profile-menu-item .profile-name {
+  font-weight: 500;
+}
+
+.profile-menu-item.active {
+  background: var(--brand-soft);
+}
+
+.profile-menu-item.active .profile-name {
+  font-weight: 600;
+}
+
+.profile-menu-item .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--brand);
+}
+
+.profile-menu-item:hover:not(:disabled):not(.active),
+.profile-menu-action:hover {
+  background: var(--nav-hover);
+}
+
+.profile-menu-item:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.profile-menu-item:focus-visible,
+.profile-menu-action:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-color);
+}
+
+.profile-menu-footer {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.profile-menu-action {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.profile-menu-action .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.profile-menu-action:hover {
+  color: var(--text);
+}
+
+/* Badge editor in the profiles dialog */
+.profile-list li.editing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-color: var(--brand-line);
+}
+
+.badge-editor {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.badge-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 0;
+}
+
+.badge-row {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.profile-list .initials-input {
+  flex: 0 0 4.2rem;
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.badge-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--badge);
+  cursor: pointer;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.swatch:hover {
+  transform: scale(1.1);
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--badge);
+}
+
+.swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--focus-color);
+}
+
+.new-profile {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.new-profile input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+}
+
+.new-profile input[type="text"]:focus {
+  outline: none;
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-ring);
+}
+
+.new-swatches {
+  margin: var(--spacing-sm) 0 var(--spacing-sm) 38px;
+}
+
+/* Confirmations */
+.confirm-modal .modal-header {
+  border-bottom: none;
+  margin-bottom: var(--spacing-sm);
+}
+
+.confirm-message {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.btn-danger {
+  background-color: var(--danger);
+  color: #FFFFFF;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--danger) 85%, #000000);
+}
+
+
+/* One line at every width: the tell-tales are fixed-size tiles, so five of
+   them take about 200px and never need to wrap or shrink. */
+.app-container > .status-bar {
+  flex-wrap: nowrap;
+}
+
+.app-container > .status-bar .engine-state {
+  flex: none;
+}
+
+.app-container > .status-bar .status-checks {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The profile you are in, marked by colour rather than a label. */
+.profile-list li.active {
+  position: relative;
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+
+.profile-list li.active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
+}
+
+.profile-list li.active .profile-list-name {
+  font-weight: 600;
+}
+
+/* After the pinned-bar rule above, which it must override: its margins
+   cancel the column's desktop padding, and at phone width that padding is
+   smaller, so the bar hung 16px past both edges of the screen. */
+@media (max-width: 760px) {
+  .app-container > .status-bar {
+    margin: calc(-1 * var(--spacing-md)) calc(-1 * var(--spacing-md)) var(--spacing-md);
+    padding: 10px var(--spacing-md);
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────
+   Radio Log
+   ───────────────────────────────────────────────────────────────── */
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.log-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.log-search .icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.log-search input {
+  width: 100%;
+  padding: 0.55rem 0.7rem 0.55rem 2.1rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.log-search input:focus {
+  outline: none;
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-ring);
+}
+
+.log-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm) var(--spacing-md);
+  margin: var(--spacing-md) 0 var(--spacing-sm);
+}
+
+.log-filters .chip-row {
+  margin: 0;
+}
+
+.chip-count {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+
+.log-count {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-empty {
+  padding: var(--spacing-xl) 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.log-day + .log-day {
+  margin-top: var(--spacing-md);
+}
+
+.log-day-title {
+  position: sticky;
+  top: 61px;               /* under the pinned status bar */
+  z-index: 5;
+  margin: 0 calc(-1 * var(--spacing-lg));
+  padding: 6px var(--spacing-lg);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.log-list {
+  list-style: none;
+}
+
+/* time | what happened | rating */
+.log-row {
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr) auto;
+  gap: 0 var(--spacing-md);
+  align-items: start;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.log-row:last-child {
+  border-bottom: none;
+}
+
+.log-row .log-time {
+  padding-top: 2px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-row.event {
+  padding: 0.45rem 0;
+}
+
+.log-q {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.log-q .icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  color: var(--text-faint);
+}
+
+.log-a {
+  margin-top: 2px;
+  color: var(--text);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.log-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.log-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.log-tag.bad {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.log-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.log-more .icon {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.15s ease;
+}
+
+.log-more:hover {
+  color: var(--text);
+}
+
+.log-more:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+.log-row.open .log-more .icon {
+  transform: rotate(90deg);
+}
+
+.log-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--brand);
+  background: var(--brand-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.log-note .icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  color: var(--brand);
+}
+
+.log-note-edit {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: 6px;
+}
+
+.log-note-edit input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.log-note-edit input:focus {
+  outline: none;
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-ring);
+}
+
+.log-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px var(--spacing-md);
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+.log-details dt {
+  color: var(--text-faint);
+}
+
+.log-details dd {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.log-details .btn {
+  margin-top: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.log-rate {
+  display: flex;
+  gap: 2px;
+}
+
+.log-rate .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.log-rate .icon-btn.on {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.log-rate .icon-btn.down.on {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* Warnings and errors: one line, coloured by how bad. */
+.log-event {
+  --level: var(--warning);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  grid-column: 2 / 4;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.log-event.error,
+.log-event.critical {
+  --level: var(--danger);
+}
+
+.log-event .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--level);
+}
+
+.log-event-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.log-source {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Export dialog */
+.export-options {
+  margin-bottom: var(--spacing-sm);
+}
+
+.export-options .form-group {
+  margin-bottom: var(--spacing-sm);
+}
+
+.export-privacy {
+  margin-bottom: var(--spacing-lg);
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.export-path {
+  margin: calc(-1 * var(--spacing-md)) 0 var(--spacing-lg);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+@container (max-width: 640px) {
+  .log-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .log-row .log-time {
+    grid-column: 1 / -1;
+  }
+
+  .log-event {
+    grid-column: 1 / -1;
+  }
+}
+
+
+/* A note on a log entry, with its delete at the end of the line. */
+.log-note-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.log-note .note-delete {
+  width: 24px;
+  height: 24px;
+  margin: -3px -4px -3px 0;
+}
+
+.log-note .note-delete .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+}
+
+.log-note .note-delete:hover .icon {
+  color: var(--danger);
 }

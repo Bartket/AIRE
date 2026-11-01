@@ -192,3 +192,105 @@ def test_an_unchanged_binding_is_left_alone():
     orch.apply_config()
 
     assert orch.push_to_button is before
+
+
+# ── Esc cancels a bind ──────────────────────────────────────────────────
+#
+# Bind waited fifteen seconds for a press with no way out: a click on the
+# wrong button meant sitting it out, or binding whatever came to hand.
+
+class _Key:
+    def __init__(self, name=None, char=None):
+        self.name, self.char, self.vk = name, char, None
+
+
+def _fake_keyboard(*presses):
+    """A pynput stand-in whose listener presses the given keys on start."""
+    class Listener:
+        daemon = False
+
+        def __init__(self, on_press, on_release):
+            self._press = on_press
+
+        def start(self):
+            for key in presses:
+                self._press(key)
+
+        def stop(self):
+            pass
+
+    return type("keyboard", (), {"Listener": Listener})
+
+
+def _capture(monkeypatch, *presses):
+    from ai_race_engineer import input_handler
+
+    monkeypatch.setattr(input_handler, "HAS_PYNPUT", True)
+    monkeypatch.setattr(input_handler, "keyboard", _fake_keyboard(*presses), raising=False)
+    orch = _orchestrator({"type": "keyboard", "key": "shift"})
+    return orch.push_to_button.capture_next_key(timeout=1)
+
+
+def test_esc_cancels_a_key_capture(monkeypatch):
+    from ai_race_engineer.input_handler import CaptureCancelled
+
+    with pytest.raises(CaptureCancelled):
+        _capture(monkeypatch, _Key(name="esc"))
+
+
+def test_any_other_key_is_still_bound(monkeypatch):
+    assert _capture(monkeypatch, _Key(char="r")) == "r"
+
+
+def test_the_panel_can_cancel_a_wheel_capture(monkeypatch):
+    import threading
+    import time
+
+    from ai_race_engineer.controller import ControllerHub
+    from ai_race_engineer.input_handler import CaptureCancelled
+
+    hub = ControllerHub()
+    monkeypatch.setattr(hub, "start", lambda: True)
+    outcome = []
+
+    def capture():
+        try:
+            outcome.append(hub.capture_next_press(timeout=10))
+        except CaptureCancelled:
+            outcome.append("cancelled")
+
+    started = time.monotonic()
+    worker = threading.Thread(target=capture)
+    worker.start()
+    while hub._capture is None:
+        time.sleep(0.01)
+    assert hub.cancel_capture() is True
+    worker.join(timeout=5)
+
+    assert outcome == ["cancelled"]
+    assert time.monotonic() - started < 2, "cancel waited out the timeout"
+    assert hub.cancel_capture() is False, "nothing left to cancel"
+
+
+def test_a_cancelled_bind_keeps_the_old_binding(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from ai_race_engineer import input_handler
+    from ai_race_engineer.input_handler import CaptureCancelled
+    from ai_race_engineer.web_ui import create_app
+
+    config = AppConfig({"telemetry": {"source": "simulated"},
+                        "push_to_button": {"type": "keyboard", "key": "f13"}},
+                       path=tmp_path / "config.json")
+    app = create_app(config)
+    monkeypatch.setattr(input_handler, "HAS_PYNPUT", True)
+
+    def cancelled(timeout):
+        raise CaptureCancelled()
+
+    monkeypatch.setattr(app.state.orchestrator.push_to_button, "capture_next_key", cancelled)
+    body = TestClient(app, base_url="http://127.0.0.1:9420").post(
+        "/api/keyboard/bind", json={"timeout": 1}).json()
+
+    assert body == {"ok": False, "cancelled": True}
+    assert config.push_to_button["key"] == "f13"

@@ -65,6 +65,9 @@ class TTS:
                           else "")
         self._voice_settings = dict(voice_settings or {})
         self._cache = cache
+        # Whether the last synthesize() was replayed from the cache, for the
+        # Radio Log: a cached take costs nothing and cannot be a new garble.
+        self.last_from_cache = False
         # Driver's own respellings, layered over the built-in table.
         self._pronunciation = dict(pronunciation or {})
         # Built from the current grid each answer; see auto_pronunciation.
@@ -128,6 +131,7 @@ class TTS:
 
     def synthesize(self, text: str, regenerate: bool = False) -> bytes:
         """Synthesize speech, returning raw 16-bit mono PCM at 24 kHz."""
+        self.last_from_cache = False
         if not self._api_key:
             raise TTSError("No ElevenLabs TTS API key configured")
         if not text.strip():
@@ -170,6 +174,7 @@ class TTS:
                         self._cache.delete(key)
                     else:
                         logger.debug("Speech served from cache (%d bytes)", len(cached))
+                        self.last_from_cache = True
                         return cached
 
         payload = {

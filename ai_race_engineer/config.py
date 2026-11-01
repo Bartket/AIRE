@@ -245,10 +245,80 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     # name on every answer is worse than no name at all. Blank means use
     # what the sim supplies.
     "driver_callsign": "",
-    "memory_log": 20,
+    "radio_log": {
+        # Every exchange and warning, kept in radio-log.jsonl beside this
+        # file so feedback can be gathered across sessions and exported in
+        # one go. Off keeps it in memory only, as the exchange log was.
+        "enabled": True,
+        # Entries kept, newest first; 100-5000.
+        "keep": 1000,
+        # Days an entry is kept: 1, 7, 30 or 90, or 0 for no time limit.
+        # The entry cap applies either way.
+        "retention_days": 30,
+    },
     "language": "en",
     "log_level": "INFO",
+    # The driver profile the settings below belong to. Changed only by
+    # switching profile, never by a settings save; see profiles.py.
+    "active_profile": "default",
 }
+
+# What a driver profile holds: the settings that belong to a person rather
+# than to the machine or the accounts. API keys, the model, audio devices,
+# the push-to-talk binding (one wheel per rig), the cache, window and
+# performance stay shared, so switching driver never re-binds a button or
+# logs anyone out. This table is the only definition of a profile.
+_PROFILE_KEYS = (
+    ("driver_callsign",),
+    ("system_prompt",),
+    ("elevenlabs", "tts_model"),
+    ("elevenlabs", "tts_voice_id"),
+    ("elevenlabs", "tts_voice_name"),
+    ("elevenlabs", "voice_settings"),
+    ("elevenlabs", "favourite_voices"),
+    ("elevenlabs", "pronunciation"),
+    ("elevenlabs", "name_policy"),
+    ("telemetry", "units"),
+    ("telemetry", "fuel_units"),
+    ("audio", "volume"),
+    ("audio", "ptt_beep"),
+    ("audio", "ptt_beep_volume"),
+    ("audio", "min_reply_seconds"),
+    ("radio_effect",),
+    ("push_to_button", "mode"),
+    ("pit_commands",),
+)
+
+_MISSING = object()
+
+
+def _lookup(data: Dict[str, Any], path: tuple) -> Any:
+    for key in path:
+        if not isinstance(data, dict) or key not in data:
+            return _MISSING
+        data = data[key]
+    return data
+
+
+def _profile_subset(data: Dict[str, Any]) -> Dict[str, Any]:
+    """The profile-scoped settings out of a full config dict, nested as there.
+
+    An unedited prompt is left out, as `save()` leaves it out of config.json,
+    so the profile goes on tracking the shipped one. Here rather than in
+    `save()` because a profile is also written outside a save.
+    """
+    out: Dict[str, Any] = {}
+    for path in _PROFILE_KEYS:
+        value = _lookup(data, path)
+        if value is _MISSING:
+            continue
+        if path == ("system_prompt",) and value == _DEFAULT_CONFIG["system_prompt"]:
+            continue
+        node = out
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = copy.deepcopy(value)
+    return out
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -312,6 +382,11 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
     # Mouse push-to-talk is gone: a mouse button is exactly what a sim racer
     # does not have a spare hand for, and it collided with the UI. Anything
     # bound to one falls back to the keyboard default.
+    # "memory_log" sized the in-memory exchange log. The Radio Log replaced
+    # it with its own section; the old number was a popup length, not a
+    # retention choice, so it is dropped rather than carried across.
+    data.pop("memory_log", None)
+
     ptb = data.get("push_to_button")
     if isinstance(ptb, dict) and str(ptb.get("type", "")).lower() == "mouse":
         ptb["type"] = "keyboard"
@@ -420,6 +495,11 @@ class AppConfig:
         the UI can post its (blanked) view back without wiping stored keys."""
         patch = _migrate(patch)
         patch = self._drop_blank_secrets(patch)
+        # The panel posts back the whole config it was given, which carries
+        # the profile that was active when it loaded. Only switching profile
+        # may change it; a stale view must not quietly move the settings
+        # into another driver's file.
+        patch.pop("active_profile", None)
         with self._lock:
             self._data = _deep_merge(self._data, patch)
             self._dirty = True
@@ -461,6 +541,9 @@ class AppConfig:
             json.dump(data, f, indent=2)
         tmp.replace(self._path)
         logger.debug("Config saved to %s", self._path)
+        # Mirrored from the same copy, so the profile file and config.json
+        # never disagree about what was saved.
+        self.profiles().write(self.active_profile, _profile_subset(data))
 
     def maybe_save(self) -> None:
         """Save only if something changed. Never raises."""
@@ -648,6 +731,56 @@ class AppConfig:
             int(el.get("cache_mb", 128)),
             bool(el.get("cache_speech", True)),
         )
+
+    # ── Driver profiles ─────────────────────────────────────────────
+
+    @property
+    def active_profile(self) -> str:
+        from .profiles import DEFAULT_ID, valid_id
+
+        profile_id = self._data.get("active_profile") or DEFAULT_ID
+        return profile_id if valid_id(profile_id) else DEFAULT_ID
+
+    def profiles(self):
+        """The profiles directory, beside config.json."""
+        from .profiles import ProfileStore
+
+        return ProfileStore(Path(self.path).parent / "profiles")
+
+    @staticmethod
+    def default_profile_values() -> Dict[str, Any]:
+        """The shipped profile settings: what a new driver starts with."""
+        return _profile_subset(_DEFAULT_CONFIG)
+
+    def profile_values(self) -> Dict[str, Any]:
+        """The live profile-scoped settings, as a profile file stores them."""
+        with self._lock:
+            return _profile_subset(self._data)
+
+    def apply_profile(self, profile_id: str, values: Dict[str, Any]) -> None:
+        """Make `values` the live profile settings and `profile_id` active.
+
+        Each path is assigned, not merged. A merge — what `update()` does —
+        would keep every pronunciation and favourite of the driver switched
+        away from, since a dict only gains keys in a merge. A path the file
+        lacks, because it was written before that setting existed, takes
+        the shipped value rather than whatever the previous driver had.
+        """
+        with self._lock:
+            for path in _PROFILE_KEYS:
+                value = _lookup(values, path)
+                default = _lookup(_DEFAULT_CONFIG, path)
+                if value is _MISSING:
+                    value = default
+                elif isinstance(value, dict) and isinstance(default, dict):
+                    # Over the shipped section, never the current one.
+                    value = _deep_merge(default, value)
+                node = self._data
+                for key in path[:-1]:
+                    node = node.setdefault(key, {})
+                node[path[-1]] = copy.deepcopy(value)
+            self._data["active_profile"] = profile_id
+            self._dirty = True
 
     def elevenlabs_key(self) -> str:
         """The ElevenLabs key, falling back to ELEVENLABS_API_KEY.

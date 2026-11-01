@@ -31,10 +31,12 @@ AIRE is an independent community project. It is not affiliated with, endorsed
 by, or supported by iRacing.com Motorsport Simulations, LLC. iRacing is a
 trademark of its respective owner.
 
-<img src="docs/images/race.png" alt="The AIRE settings panel" width="820">
+<img src="docs/images/home.png" alt="The AIRE panel's Home view" width="820">
 
-<sub>The dots along the top are a live readiness check — engineer, telemetry,
-speech, and your push-to-talk button. Green is ready, red is not.</sub>
+<sub>The lights along the top are a live readiness check, like the warning
+lamps on a dash — model, telemetry, voice, push-to-talk and pit commands.
+Green is ready or on; grey is off or simulated; amber or red wants something,
+and hovering says what. Click one to go to the setting that fixes it.</sub>
 
 ---
 
@@ -71,8 +73,9 @@ release notes.
    API key under [Keys](https://openrouter.ai/settings/keys).
 2. In AIRE, open **Engineer**, paste the key into **API Key**, and leave the
    default model selected for the first run.
-3. Click **Save Settings**, then **Test connection**. A successful test shows
-   the model's short reply below the button.
+3. Click **Test connection**. It tries what is on screen, saved or not, and
+   saves nothing; a notification shows the model's short reply, or why it
+   failed. Then save.
 
 The default model is chosen because it passed AIRE's behavior smoke test.
 Changing to a weaker model can produce fluent but unsafe answers. OpenRouter
@@ -83,11 +86,15 @@ charges your OpenRouter account; its dashboard shows the exact usage.
 ### 3. Connect speech and choose a voice — ElevenLabs
 
 1. Create an account at [ElevenLabs](https://elevenlabs.io/), then create an
-   API key under [API Keys](https://elevenlabs.io/app/settings/api-keys). A
+   API key under [API Keys](https://elevenlabs.io/app/developers/api-keys). A
    restricted key must allow Speech to Text, Text to Speech, and reading
    voices.
-2. In AIRE, open **Voice**, paste the key into **API Key**, and click
-   **Save Settings**. Saving first matters: **Load voices** uses the saved key.
+2. In AIRE, open **Voice**, paste the key into **API Key**, and click **Test
+   connection**. It checks each of those three on its own — it lists your
+   voices, says "radio check" and hears it back — so a restricted key shows
+   which permission is missing. That costs a few characters of speech and
+   about a second of transcription. Then click **Save**: **Load voices** uses
+   the saved key.
 3. Click **Load voices**, choose an available voice, then click **Preview
    through radio**. If a library voice is unavailable on your ElevenLabs plan,
    AIRE greys it out instead of failing during a race.
@@ -126,7 +133,7 @@ what the current car's dashboard shows: litres, kilograms, or US gallons.
 iRacing does not publish which unit an individual car dashboard uses, so AIRE
 cannot safely choose kilograms automatically.
 
-Leave **Pit commands — at my own risk** off for the first run. It is the only
+Leave **Enable pit commands** off for the first run. It is the only
 feature that writes to the sim and has its own [safety workflow](#pit-stop-commands-opt-in-at-your-own-risk).
 
 ### 7. Test, then race
@@ -183,8 +190,16 @@ the [ElevenLabs privacy policy](https://elevenlabs.io/privacy-policy) and the
 On the computer, AIRE stores API keys in plain text in
 `%APPDATA%\AIRE\config.json`. Treat that file like a password. Synthesized
 answers may be stored in `speech-cache\` so repeated lines do not cost money;
-the cache can be cleared under **Voice → Speech Cache**. The exchange log is
-memory-only and disappears when AIRE exits. `aire.log` holds warnings and
+the cache can be cleared under **App → Speech Cache**. Driver profiles are
+kept in `profiles\` beside `config.json` and hold no keys.
+
+The [Radio Log](#radio-log) keeps your questions, the engineer's answers,
+warnings, and any ratings and notes you add in `radio-log.jsonl` beside
+`config.json` — for 30 days, and at most the newest 1,000 entries, unless
+you change either. The answers can name other drivers. Clear all of it or
+only older entries, or switch it off so it lasts only until AIRE closes,
+under **App → Radio Log**. Nothing leaves the PC unless you export it,
+and an export never contains your API keys. `aire.log` holds warnings and
 errors only, never your questions or the engineer's answers, although a
 malformed model reply can be quoted in one. Diagnostic recording is off by
 default; when enabled, `diagnostic-trace.jsonl` contains radio text, driver
@@ -298,8 +313,8 @@ not enough to name every rival's tyres safely in a mixed-car field.
 
 ### Pit stop commands: opt-in, at your own risk
 
-Pit commands are the one feature that writes to iRacing. They ship off. Enable
-**Pit commands — at my own risk** on the Race tab only if you accept that a
+Pit commands are the one feature that writes to iRacing. They ship off. Turn on
+**Enable pit commands** on the Race tab only if you accept that a
 misheard radio command can change the car at the next stop.
 
 Speak to it as you would a human engineer; the wording is not a command list:
@@ -329,8 +344,8 @@ keeps the command waiting. Any unrelated transmission, a 30-second delay, a sess
 turning the setting off also discards the pending command. Fuel calculations
 and ordinary answers never set the pit stop.
 
-**Ask me to confirm “pit stop …” commands** (on by default) can be switched off
-on the Race tab. A command that starts with *pit stop* is then set as soon as
+**Skip confirmation for “pit stop …” commands** (off by default) is on the
+Race tab. Switched on, a command that starts with *pit stop* is set as soon as
 you say it, and read back as set — so a misheard one cannot be cancelled
 first. That includes a *pit stop* command worded outside the grammar above,
 which the model interprets and which is then set without asking. Commands
@@ -391,8 +406,8 @@ out of the session clock. "How are we looking" is your place on lap time and how
 far off the best lap in your class you are, and the cars either side are traffic
 you are catching or being caught by, never a battle.
 
-Each entry in the exchange log shows the session type iRacing reported and how
-the engineer classified it. A type it does not recognise, or an empty one, is
+Each exchange in the [Radio Log](#radio-log) shows, under **Details**, the
+session type iRacing reported and how the engineer classified it. A type it does not recognise, or an empty one, is
 treated as a race — if a practice answer sounds like a race, that tag says which
 of the two happened.
 
@@ -413,23 +428,31 @@ allowed to invent warmth, never events.
 
 ## Configuration
 
-Everything is in the settings panel, grouped by tab. The same values live in
+Everything is in the settings panel, one section per entry in the sidebar.
+The same values live in
 `config.json` if you would rather edit that — see
 [config.json.example](config.json.example) for the full schema.
 
 | Tab | What is there |
 | --- | --- |
-| **Race** | Ask by text, telemetry source and units, live readout, opt-in pit commands |
+| **Home** | Live readout, ask by text, the last few exchanges |
+| **Race** | Telemetry source and units, opt-in pit commands |
 | **Engineer** | LLM provider, key, model, memory, what to call you, system prompt |
 | **Voice** | ElevenLabs key, STT/TTS models, voice picker, delivery presets, hard-to-say names |
 | **Audio** | Input/output devices, radio blips, engineer volume and boost, radio effect, audio ducking |
 | **Input** | Push-to-talk mode, recording cut-off, keyboard or wheel binding |
-| **App** | Theme, hide-to-tray, process priority, speech cache, exchange log size, defaults |
+| **App** | Theme, hide-to-tray, process priority, speech cache, Radio Log settings, defaults |
+| **Radio Log** | Every question, answer and warning: search, rate, export |
 
 Settings most drivers never need — the endpoint, temperature, token budget,
 voice sliders and radio filter — sit under **Advanced** in their section.
 Each hint says what a control does in a line; **More** opens the part of this
 README that says why.
+
+Changes are not applied until you save. A bar appears at the bottom of the
+panel as soon as anything differs from what is saved, with **Save** and
+**Discard**. A few actions save on the spot and never show there: starring or
+choosing a voice, and binding push-to-talk.
 
 Config lives at `%APPDATA%\AIRE\config.json` on Windows, or
 `~/.config/AIRE/config.json` elsewhere. Point elsewhere with
@@ -442,6 +465,40 @@ Secrets can come from the environment instead of the file:
 | `OPENROUTER_API_KEY` | OpenRouter |
 | `ELEVENLABS_API_KEY` | Speech recognition and the engineer's voice |
 | `AIRE_CONFIG` | Config file location |
+
+### Driver profiles
+
+For a rig more than one person drives. The profile switcher at the top of the
+sidebar swaps the settings that belong to a person, and leaves alone the ones
+that belong to the PC or the accounts.
+
+| Follows the driver | Shared by every profile |
+| --- | --- |
+| What the engineer calls you, the system prompt | API keys, LLM provider and model |
+| Voice, speech model, delivery sliders, favourites | Microphone and output device |
+| Hard-to-say-names policy, pronunciation table | The push-to-talk key or wheel button |
+| Units and fuel units | Telemetry source, ducking |
+| Engineer volume, quickest reply, radio blips | Speech cache, window, performance |
+| Radio effect, push-to-talk hold/toggle, pit commands | |
+
+**Manage profiles…** adds, edits and deletes them. A new profile starts on
+the shipped settings, speaking in the default voice until you choose one;
+switch to it, change what differs and save. The profile you are in is
+highlighted, and cannot be deleted.
+
+Each profile has a badge: two letters and a colour, set with the pencil
+beside it. Leave the letters blank and they are taken from the name. A new
+profile gets a colour nobody else has, so two drivers are never both orange.
+
+A switch waits while the engineer is recording, thinking or speaking, or while
+a pit command is waiting for confirm or cancel. A switch then would change
+the voice mid-sentence, or leave one driver's pit request to be confirmed
+under the other's settings.
+
+Profiles are JSON files in `%APPDATA%\AIRE\profiles\`, one per driver,
+beside `config.json`. They hold no API keys and nothing leaves the PC.
+`config.json` still holds every live setting, the current driver's included,
+so an older AIRE reads it as it always did.
 
 ### LLM providers
 
@@ -608,8 +665,8 @@ replacement also evicts that phrase's bad cached audio.
 The bad take is not thrown away: the last 20 are kept in
 `speech-cache\rejected\` as WAV files, each with a `.json` beside it holding
 the exact text sent. Listen to a few. If the same kind of word garbles every
-time — a name, a car class — a respelling in the pronunciation table fixes it
-for free; if the voice keeps talking after the sentence, it is the model —
+time — a name, a car class — a respelling in the
+[pronunciation table](#when-the-voice-mangles-a-name) fixes it for free; if the voice keeps talking after the sentence, it is the model —
 see [Choosing a speech model](#choosing-a-speech-model).
 
 ### Choosing a speech model
@@ -662,8 +719,6 @@ preview at a time; favourites survive a settings reset for that reason.
 
 ### When the voice mangles a name
 
-**Voice → Say it like this** fixes names the voice stumbles over.
-
 The tell is that it is *intermittent* — a name comes out clean once and
 slurred the next time. That is the voice being unsure of the spelling rather
 than getting it consistently wrong, and uncertainty shows up as artefacts.
@@ -684,11 +739,18 @@ Three things happen, in order, and the first two need no setup:
    Switch it off under **Hard-to-say names** if you would rather always
    hear names.
 
-**Say it like this** is only for when you want a specific spelling. It
-always wins over the automatic car number.
+For a specific spelling, add it to the pronunciation table in `config.json`
+with AIRE closed — it has no control in the panel:
+
+```json
+"elevenlabs": { "pronunciation": { "Kovács": "Kovach" } }
+```
+
+Keys match whole words, ignoring case. A respelling always wins over the
+automatic car number.
 
 **Only the audio changes.** The engineer still knows the real name, and the
-exchange log still records it — so what you read back is what was said, not
+Radio Log still records it — so what you read back is what was said, not
 what was spoken.
 
 ### What the engineer calls you
@@ -757,6 +819,33 @@ Presets worth trying:
 Use **Preview through radio** / **Preview dry** in the panel to A/B them; that
 needs an ElevenLabs key, since it runs a real synthesized line through the chain.
 
+### Radio Log
+
+Every question and answer, and every warning or error, in one timeline you can
+search. Each exchange shows how it was answered — straight from telemetry, by
+a calculator, or by the model — and how long it took; **Details** adds the
+stage timings, how sure speech recognition was, the model, the profile and
+whether the speech came from the cache.
+
+**Rate answers as you go.** Thumbs up or down, and a note on what was wrong
+— *misheard me*, *wrong fuel number*. **Problems** shows only failed answers,
+"say again"s, thumbs-down and warnings.
+
+**Export…** writes `AIRE-feedback-<date>-<time>.zip` to your Downloads folder
+with the entries shown — so search or filter first to send just the ones
+that matter. It holds them as JSON and as plain text, the app version and the
+settings that shape an answer, and optionally `aire.log` and the diagnostic
+trace. It never holds your API keys, and a custom system prompt or callsign is
+reported as set, not quoted. Attach it to a
+[GitHub issue](https://github.com/Bartket/AIRE/issues).
+
+Notes can be deleted with the bin beside them; the rating stays. **Clear…**
+removes everything, or only entries older than an hour, a day, a week or 30
+days — each choice shows how many it would delete. **App → Radio Log → Keep
+entries for** deletes old entries on its own — 30 days by default, or 1, 7 or
+90, or no time limit. The log is kept between runs; see
+[Privacy and data flow](#privacy-and-data-flow).
+
 ### Speech cache
 
 Speech is billed per character every time, even for phrases the engineer has
@@ -780,7 +869,7 @@ changing stability or speed produces new audio rather than serving the old
 recording. It lives in `speech-cache/` beside `config.json`, because the
 phrases worth caching repeat across sessions rather than within one.
 
-**Voice → Speech Cache** shows the hit rate and clears it.
+**App → Speech Cache** shows the hit rate and clears it.
 
 ### Telemetry sources
 
@@ -948,6 +1037,9 @@ Bindings are matched by device GUID first, then name, then index, so they
 survive being plugged into a different USB port. The binding stays live while
 the sim has focus, so pick a button you do not use in-car.
 
+Press **Esc** while either is waiting to cancel and keep the binding you had.
+Esc itself cannot be bound for that reason; it opens the sim's menus anyway.
+
 ## Developer reference
 
 ### Windows desktop app
@@ -965,7 +1057,7 @@ with a system tray icon.
 
 #### Appearance
 
-**Theme** in the header: *Auto* follows Windows, or pick *Dark* or *Light*
+**App → Theme**: *Auto* follows Windows, or pick *Dark* or *Light*
 explicitly. The choice is remembered.
 
 **App → Closing the window hides it to the tray** controls whether the close
@@ -1025,7 +1117,13 @@ do not fully trust.
 | GET | `/api/controllers` | Detected wheel and button-box devices |
 | POST | `/api/controllers/bind` | Capture the next wheel button press |
 | POST | `/api/keyboard/bind` | Capture the next keyboard binding |
-| GET | `/api/log` | Exchange log |
+| GET | `/api/log?since_rev=N` | Radio Log entries changed since revision `N` (all with no `N`) |
+| POST | `/api/log/{id}/feedback` | Rate an answer up or down, with a note |
+| POST | `/api/log/export`, `/api/log/export/reveal` | Write a feedback bundle; show it in Explorer |
+| POST | `/api/log/clear` | Delete the Radio Log |
+| GET/POST | `/api/profiles` | List driver profiles / add one, copied from the current one |
+| POST | `/api/profiles/{id}/activate` | Switch driver profile (409 while the engineer is busy) |
+| POST | `/api/profiles/{id}/edit`, `/api/profiles/{id}/delete` | Rename a profile or change its badge; delete one |
 
 ### Diagnostic trace replay
 

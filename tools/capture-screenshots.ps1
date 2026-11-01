@@ -94,7 +94,7 @@ try {
     }
     Write-Host ("Ready after " + $i + "s.")
 
-    $tabs = @('race', 'engineer', 'voice', 'audio', 'input', 'app')
+    $tabs = @('home', 'race', 'engineer', 'voice', 'audio', 'input', 'app', 'log')
     foreach ($tab in $tabs) {
         $out = Join-Path $OutDir "$tab.png"
         $profile = Join-Path $env:TEMP ("edge-shot-" + [guid]::NewGuid().ToString('N'))

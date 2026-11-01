@@ -47,6 +47,13 @@ def _client(tmp_path, bind_host="127.0.0.1"):
     "/api/speech_cache/clear",
     "/api/llm/test",
     "/api/window/show",
+    "/api/controllers/bind/cancel",
+    "/api/log/clear",
+    "/api/log/export",
+    "/api/log/export/reveal",
+    "/api/log/0123456789ab/feedback",
+    "/api/elevenlabs/test",
+    "/api/llm/models",
 ])
 def test_a_cross_site_form_post_is_refused(tmp_path, path):
     """The parameterless endpoints, which took no body to reach."""

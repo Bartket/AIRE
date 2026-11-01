@@ -8,11 +8,46 @@
     <script src="/static/vendor/vue-3.5.41.global.prod.js"></script>
 </head>
 <body class="settings-panel">
-    <div id="app" class="app-container">
-        <header class="settings-header">
+    <!-- Icons: Lucide 0.460.0 path data (ISC, static/vendor/LUCIDE-LICENSE.txt),
+         inlined so the panel needs no network. Used as <use href="#i-…">. -->
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+            <symbol id="i-audio-lines" viewBox="0 0 24 24"><path d="M2 10v3" /> <path d="M6 6v11" /> <path d="M10 3v18" /> <path d="M14 8v7" /> <path d="M18 5v13" /> <path d="M22 10v3" /></symbol>
+            <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+            <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5" /> <path d="m7 9 5-5 5 5" /></symbol>
+            <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /> <line x1="4" x2="4" y1="22" y2="15" /></symbol>
+            <symbol id="i-headset" viewBox="0 0 24 24"><path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" /> <path d="M21 16v2a4 4 0 0 1-4 4h-5" /></symbol>
+            <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /> <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+            <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol>
+            <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01" /> <path d="M12 12h.01" /> <path d="M14 8h.01" /> <path d="M16 12h.01" /> <path d="M18 8h.01" /> <path d="M6 8h.01" /> <path d="M7 16h10" /> <path d="M8 12h.01" /> <rect width="20" height="16" x="2" y="4" rx="2" /></symbol>
+            <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /> <path d="m15 5 4 4" /></symbol>
+            <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
+            <symbol id="i-scroll-text" viewBox="0 0 24 24"><path d="M15 12h-5" /> <path d="M15 8h-5" /> <path d="M19 17V5a2 2 0 0 0-2-2H4" /> <path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></symbol>
+            <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /> <path d="m21.854 2.147-10.94 10.939" /></symbol>
+            <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /> <circle cx="12" cy="12" r="3" /></symbol>
+            <symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M3 6h18" /> <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /> <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /> <line x1="10" x2="10" y1="11" y2="17" /> <line x1="14" x2="14" y1="11" y2="17" /></symbol>
+            <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <circle cx="9" cy="7" r="4" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <path d="M16 3.13a4 4 0 0 1 0 7.75" /></symbol>
+            <symbol id="i-volume-2" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" /> <path d="M16 9a5 5 0 0 1 0 6" /> <path d="M19.364 18.364a9 9 0 0 0 0-12.728" /></symbol>
+            <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" /> <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" /> <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" /> <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" /> <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" /> <path d="M3.477 10.896a4 4 0 0 1 .585-.396" /> <path d="M19.938 10.5a4 4 0 0 1 .585.396" /> <path d="M6 18a4 4 0 0 1-1.967-.516" /> <path d="M19.967 17.484A4 4 0 0 1 18 18" /></symbol>
+            <symbol id="i-gamepad-2" viewBox="0 0 24 24"><line x1="6" x2="10" y1="11" y2="11" /> <line x1="8" x2="8" y1="9" y2="13" /> <line x1="15" x2="15.01" y1="12" y2="12" /> <line x1="18" x2="18.01" y1="10" y2="10" /> <path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z" /></symbol>
+            <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4" /> <path d="M3.34 19a10 10 0 1 1 17.32 0" /></symbol>
+            <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></symbol>
+            <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+            <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol>
+            <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <polyline points="7 10 12 15 17 10" /> <line x1="12" x2="12" y1="15" y2="3" /></symbol>
+            <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></symbol>
+            <symbol id="i-message-square-text" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /> <path d="M13 8H7" /> <path d="M17 12H7" /></symbol>
+            <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /> <path d="M19 10v2a7 7 0 0 1-14 0v-2" /> <line x1="12" x2="12" y1="19" y2="22" /></symbol>
+            <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /> <path d="m21 21-4.3-4.3" /></symbol>
+            <symbol id="i-thumbs-down" viewBox="0 0 24 24"><path d="M17 14V2" /> <path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></symbol>
+            <symbol id="i-thumbs-up" viewBox="0 0 24 24"><path d="M7 10v12" /> <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /></symbol>
+            <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+    </svg>
+
+    <div id="app" class="shell">
+        <aside class="sidebar">
             <div class="brand">
                 <img class="brand-logo" src="/static/ui/logo.svg"
-                     alt="AIRE" width="44" height="44">
+                     alt="AIRE" width="36" height="36">
                 <div class="brand-text">
                     <!-- Wordmark in Board of Directors Heavy Italic, drawn as
                          outlines rather than an embedded webfont. Typodermic's
@@ -22,48 +57,124 @@
                          redistributed. Path traced from "Board of Directors Hv
                          It.otf" v2.100 at 1000 upem, trimmed to ink bounds; the
                          font itself is a free download from 1001fonts. -->
-                    <h1>
+                    <div class="brand-mark">
                         <svg class="wordmark" viewBox="0 0 2273 658" role="img"
                              aria-label="AIRE">
                             <path fill="currentColor" d="M587 658 639 363C641 352 642 341 642 331C642 315 639 301 631 285L501 0H318L87 285C66 310 57 330 52 363L0 658H207L230 523H394L370 658ZM417 389H254L257 373C260 356 262 352 273 337L365 222L417 337C420 345 422 350 422 357C422 360 421 366 420 373ZM889 658 1005 0H787L672 658ZM1578 658 1615 446C1616 439 1617 433 1617 429C1617 381 1577 367 1531 364C1579 359 1622 335 1635 261L1662 112C1664 100 1665 88 1665 78C1665 26 1637 0 1565 0H1100L985 658H1203L1286 181H1408C1421 181 1428 185 1428 197C1428 199 1428 203 1427 206L1415 281C1412 295 1405 302 1390 302H1294L1268 451H1374C1387 451 1393 457 1393 466V470L1360 658ZM2157 658 2190 470H1953C1937 470 1931 464 1931 453C1931 450 1931 447 1932 444L1943 387H2202L2225 259H1965L1974 206C1977 188 1986 180 2003 180H2240L2273 0H1894C1808 0 1772 37 1758 114L1682 543C1679 557 1678 570 1678 580C1678 633 1707 658 1779 658Z"/>
                         </svg>
-                    </h1>
+                    </div>
                     <p class="brand-sub">AI Race Engineer</p>
                 </div>
             </div>
-            <div class="settings-controls">
-                <button class="btn btn-secondary" @click="showExchangeLog = true">Exchange Log</button>
-                <button class="btn btn-secondary" @click="showAbout = true">About</button>
-                <button class="btn btn-primary" @click="saveConfig" :disabled="saving || !config">
-                    {{ saving ? 'Saving…' : 'Save Settings' }}
+
+            <!-- Driver profile. A switch swaps the per-driver settings only;
+                 keys, devices and the push-to-talk binding stay put. -->
+            <div class="profile-switch" @keydown.esc="closeProfileMenu(true)">
+                <button type="button" class="profile-button" ref="profileButton"
+                        @click="toggleProfileMenu" :aria-expanded="profileMenuOpen"
+                        aria-haspopup="menu" title="Switch driver profile">
+                    <span class="avatar" :class="'badge-' + activeBadge.color">{{ activeBadge.initials }}</span>
+                    <span class="profile-label">
+                        <span class="profile-name">{{ activeProfileName }}</span>
+                        <span class="profile-caption">{{ switchingProfile ? 'Switching…' : 'Driver profile' }}</span>
+                    </span>
+                    <svg class="icon"><use href="#i-chevrons-up-down"/></svg>
+                </button>
+                <div class="profile-menu" v-if="profileMenuOpen" role="menu" ref="profileMenu"
+                     @keydown.down.prevent="moveMenuFocus(1)" @keydown.up.prevent="moveMenuFocus(-1)">
+                    <p class="profile-menu-title">Switch driver</p>
+                    <button v-for="p in profiles" :key="p.id" type="button" role="menuitemradio"
+                            class="profile-menu-item" :class="{ active: p.id === activeProfile }"
+                            :aria-checked="p.id === activeProfile"
+                            :disabled="switchingProfile" @click="requestSwitch(p.id)">
+                        <span class="avatar" :class="'badge-' + p.color">{{ p.initials }}</span>
+                        <span class="profile-label">
+                            <span class="profile-name">{{ p.name }}</span>
+                            <span class="profile-caption" v-if="switchingTo === p.id">Switching…</span>
+                        </span>
+                        <svg class="icon" v-if="p.id === activeProfile"><use href="#i-check"/></svg>
+                    </button>
+                    <div class="profile-menu-footer">
+                        <button type="button" role="menuitem" class="profile-menu-action"
+                                @click="openProfiles(true)">
+                            <svg class="icon"><use href="#i-plus"/></svg>New profile…
+                        </button>
+                        <button type="button" role="menuitem" class="profile-menu-action"
+                                @click="openProfiles(false)">
+                            <svg class="icon"><use href="#i-users"/></svg>Manage profiles…
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="tab-bar side-nav" aria-label="Sections">
+                <button v-for="t in tabs" :key="t.id" type="button"
+                        :class="{ 'tab': true, 'active': tab === t.id }"
+                        :aria-current="tab === t.id ? 'page' : null"
+                        @click="selectTab(t.id)">
+                    <svg class="icon"><use :href="'#i-' + t.icon"/></svg>
+                    <span>{{ t.label }}</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-links">
+                <button type="button" class="side-link" @click="showAbout = true">
+                    <svg class="icon"><use href="#i-info"/></svg>About
                 </button>
             </div>
-        </header>
+        </aside>
 
-        <main class="settings-content" v-if="config">
-            <!-- Live status -->
+        <div class="app-container">
+            <!-- Live status, pinned above every tab -->
             <div class="status-bar">
                 <span class="engine-state" :class="engineState.level" :title="engineState.title">
                     <span class="status-dot" :class="{ pulse: engineState.pulse }"></span>{{ engineState.label }}
                 </span>
                 <div class="status-checks">
+                    <!-- Tell-tales: an icon per check, lit by its state like a
+                         dash warning lamp. The words are in the tooltip and
+                         the accessible name, not on the tile. -->
                     <button v-for="check in statusChecks" :key="check.id" type="button"
-                            class="status-pill" :class="check.level" :title="check.title"
+                            class="status-pill" :class="[check.level, { pulse: check.pulse }]"
+                            :aria-label="check.text"
                             @click="selectTab(check.tab)">
-                        <span class="status-dot" :class="{ pulse: check.pulse }"></span>
-                        <span class="status-text">{{ check.text }}</span>
+                        <svg class="icon" aria-hidden="true"><use :href="'#i-' + check.icon"/></svg>
+                        <span class="tell-tip" aria-hidden="true">
+                            <strong>{{ check.text }}</strong>
+                            <span v-if="check.title">{{ check.title }}</span>
+                        </span>
                     </button>
                 </div>
-            </div>
+            </div><!-- /status-bar -->
 
-            <nav class="tab-bar">
-                <button v-for="t in tabs" :key="t.id"
-                        :class="{ 'tab': true, 'active': tab === t.id }"
-                        @click="selectTab(t.id)">{{ t.label }}</button>
-            </nav>
+        <header class="page-header">
+            <h1>{{ currentTab.label }}</h1>
+            <p>{{ currentTab.blurb }}</p>
+        </header>
+
+        <main class="settings-content" v-if="config">
+            <!-- Home: live state at a glance -->
+            <section class="settings-section" v-show="tab === 'home'">
+                <h2>Live</h2>
+                <p class="hint" v-if="status.telemetry_source === 'simulated'">
+                    Simulated telemetry — practice numbers, not a real session.
+                </p>
+                <div class="stat-grid" v-if="telemetry">
+                    <div class="stat" :title="telemetry.track_name"><span>Track</span><strong>{{ telemetry.track_name || '—' }}</strong></div>
+                    <div class="stat"><span>Position</span><strong>{{ telemetry.position }}</strong></div>
+                    <div class="stat"><span>Lap</span><strong>{{ telemetry.current_lap }}</strong></div>
+                    <div class="stat"><span>Fuel</span><strong>{{ round(telemetry.fuel_level_pct, 0) }}%</strong>
+                        <em>{{ round(telemetry.fuel_remaining_laps) }} laps</em></div>
+                    <div class="stat"><span>Speed</span><strong>{{ round(telemetry.speed, 0) }}</strong><em>km/h</em></div>
+                    <div class="stat"><span>Gear</span><strong>{{ telemetry.gear || '—' }}</strong></div>
+                    <div class="stat"><span>RPM</span><strong>{{ telemetry.rpm }}</strong></div>
+                    <div class="stat"><span>Flag</span><strong>{{ telemetry.flag }}</strong></div>
+                </div>
+                <p class="hint" v-else>No telemetry yet.</p>
+            </section>
 
             <!-- Ask the engineer -->
-            <section class="settings-section" v-show="tab === 'race'">
+            <section class="settings-section" v-show="tab === 'home'">
                 <h2>Ask the Engineer</h2>
                 <div class="form-group inline-row">
                     <input
@@ -72,7 +183,8 @@
                         @keyup.enter="ask"
                         placeholder="e.g. How are my tyres looking?"
                     />
-                    <button class="btn btn-primary" @click="ask" :disabled="asking || !question.trim()">
+                    <button class="btn btn-primary btn-icon" @click="ask" :disabled="asking || !question.trim()">
+                        <svg class="icon"><use href="#i-send"/></svg>
                         {{ asking ? 'Thinking…' : 'Ask' }}
                     </button>
                 </div>
@@ -83,11 +195,143 @@
                 <p class="hint">The same pipeline as push-to-talk, without the microphone.</p>
             </section>
 
+            <!-- Recent radio -->
+            <section class="settings-section" v-show="tab === 'home'">
+                <h2>Recent Radio</h2>
+                <p class="hint" v-if="!recentRadio.length">Nothing yet — hold push-to-talk or ask above.</p>
+                <ol class="radio-feed" v-else>
+                    <li v-for="log in recentRadio" :key="log.id">
+                        <span class="log-time">{{ formatTime(log.timestamp) }}</span>
+                        <div>
+                            <p v-if="log.question" class="feed-you">{{ log.question }}</p>
+                            <p v-if="log.answer" class="feed-engineer">{{ log.answer }}</p>
+                        </div>
+                    </li>
+                </ol>
+                <button class="btn btn-secondary" v-if="recentRadio.length"
+                        @click="selectTab('log')">Open the Radio Log</button>
+            </section>
+
+            <!-- Radio Log: every exchange and warning, searchable, rateable,
+                 exportable. Entries arrive from /api/log in the 2 s poll. -->
+            <section class="settings-section log-page" v-show="tab === 'log'">
+                <div class="log-toolbar">
+                    <label class="log-search">
+                        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                        <input type="search" v-model="logQuery" aria-label="Search the Radio Log"
+                               placeholder="Search questions, answers, notes and warnings">
+                    </label>
+                    <button class="btn btn-secondary" @click="clearLog" :disabled="!logEntries.length">
+                        Clear…
+                    </button>
+                    <button class="btn btn-primary btn-icon" @click="openExport"
+                            :disabled="!filteredLog.length">
+                        <svg class="icon"><use href="#i-download"/></svg>Export…
+                    </button>
+                </div>
+                <div class="log-filters">
+                    <div class="chip-row" role="radiogroup" aria-label="Show">
+                        <button v-for="f in logFilters" :key="f.id" type="button" role="radio"
+                                :class="{ chip: true, on: logFilter === f.id }"
+                                :aria-checked="logFilter === f.id" @click="logFilter = f.id">
+                            {{ f.label }}<span class="chip-count">{{ f.count }}</span>
+                        </button>
+                    </div>
+                    <span class="log-count">
+                        {{ filteredLog.length }} of {{ logEntries.length }}<span
+                            v-if="config.radio_log && !config.radio_log.enabled"> · this session only</span>
+                    </span>
+                </div>
+
+                <p class="log-empty" v-if="!logEntries.length">
+                    Nothing yet. Hold push-to-talk, or ask on Home.
+                </p>
+                <p class="log-empty" v-else-if="!filteredLog.length">Nothing matches.</p>
+
+                <div v-for="day in logDays" :key="day.key" class="log-day">
+                    <h3 class="log-day-title">{{ day.label }}</h3>
+                    <ol class="log-list">
+                        <li v-for="e in day.entries" :key="e.id"
+                            :class="['log-row', e.kind, { open: !!logOpen[e.id], problem: isProblem(e) }]">
+                            <span class="log-time">{{ formatTime(e.timestamp) }}</span>
+
+                            <div v-if="e.kind === 'event'" class="log-event" :class="e.level">
+                                <svg class="icon" aria-hidden="true"><use href="#i-triangle-alert"/></svg>
+                                <span class="log-event-msg">{{ e.message }}</span>
+                                <span class="log-tag" v-if="e.count > 1">×{{ e.count }}</span>
+                                <span class="log-source">{{ e.source }}</span>
+                            </div>
+
+                            <div v-else class="log-body">
+                                <p class="log-q">
+                                    <svg class="icon" :aria-label="e.type === 'voice' ? 'Spoken' : 'Typed'">
+                                        <use :href="e.type === 'voice' ? '#i-mic' : '#i-keyboard'"/>
+                                    </svg>{{ e.question }}
+                                </p>
+                                <p class="log-a">{{ e.answer }}</p>
+                                <div class="log-tags">
+                                    <span class="log-tag bad" v-if="e.failed">failed</span>
+                                    <span class="log-tag" v-if="e.route">{{ routeLabel(e.route) }}</span>
+                                    <span class="log-tag" v-if="seconds(e)">{{ seconds(e) }}</span>
+                                    <span class="log-tag" v-if="e.session_kind">{{ e.session_kind }}</span>
+                                    <button type="button" class="log-more" @click="toggleLogOpen(e.id)"
+                                            :aria-expanded="!!logOpen[e.id]">
+                                        <svg class="icon"><use href="#i-chevron-right"/></svg>Details
+                                    </button>
+                                </div>
+                                <p class="log-note" v-if="e.feedback && e.feedback.note && noteEditing !== e.id">
+                                    <svg class="icon" aria-hidden="true"><use href="#i-message-square-text"/></svg>
+                                    <span class="log-note-text">{{ e.feedback.note }}</span>
+                                    <button type="button" class="icon-btn note-delete" title="Delete note"
+                                            aria-label="Delete note" @click="deleteNote(e)">
+                                        <svg class="icon"><use href="#i-trash-2"/></svg>
+                                    </button>
+                                </p>
+                                <div class="log-note-edit" v-if="noteEditing === e.id">
+                                    <input type="text" v-model="noteText" maxlength="500" :ref="'note-' + e.id"
+                                           placeholder="What was wrong? e.g. misheard me, wrong fuel number"
+                                           @keyup.enter="saveNote(e)" @keyup.esc="noteEditing = null">
+                                    <button class="btn btn-primary" @click="saveNote(e)">Save</button>
+                                    <button class="btn btn-secondary" v-if="e.feedback && e.feedback.note"
+                                            @click="deleteNote(e)">Delete</button>
+                                    <button class="btn btn-secondary" @click="noteEditing = null">Cancel</button>
+                                </div>
+                                <dl class="log-details" v-if="logOpen[e.id]">
+                                    <template v-for="row in detailRows(e)" :key="row[0]">
+                                        <dt>{{ row[0] }}</dt><dd>{{ row[1] }}</dd>
+                                    </template>
+                                    <dt></dt>
+                                    <dd><button class="btn btn-secondary btn-icon" @click="copyEntry(e)">
+                                        <svg class="icon"><use href="#i-copy"/></svg>Copy</button></dd>
+                                </dl>
+                            </div>
+
+                            <div v-if="e.kind !== 'event'" class="log-rate">
+                                <button type="button" class="icon-btn" :class="{ on: rating(e) === 'up' }"
+                                        :aria-pressed="rating(e) === 'up'" title="Good answer"
+                                        aria-label="Good answer" @click="rate(e, 'up')">
+                                    <svg class="icon"><use href="#i-thumbs-up"/></svg>
+                                </button>
+                                <button type="button" class="icon-btn down" :class="{ on: rating(e) === 'down' }"
+                                        :aria-pressed="rating(e) === 'down'" title="Bad answer"
+                                        aria-label="Bad answer" @click="rate(e, 'down')">
+                                    <svg class="icon"><use href="#i-thumbs-down"/></svg>
+                                </button>
+                                <button type="button" class="icon-btn" title="Add a note" aria-label="Add a note"
+                                        @click="editNote(e)">
+                                    <svg class="icon"><use href="#i-message-square-text"/></svg>
+                                </button>
+                            </div>
+                        </li>
+                    </ol>
+                </div>
+            </section>
+
             <!-- Telemetry -->
             <section class="settings-section" v-show="tab === 'race'">
                 <h2>Telemetry</h2>
                 <div class="form-group">
-                    <label>Source:</label>
+                    <label>Source</label>
                     <select v-model="config.telemetry.source">
                         <option value="auto">Auto (iRacing if available)</option>
                         <option value="irsdk">iRacing (shared memory)</option>
@@ -106,7 +350,7 @@
                     <strong>{{ status.telemetry_source }}</strong>.
                 </p>
                 <div class="form-group">
-                    <label>Units:</label>
+                    <label>Units</label>
                     <select v-model="config.telemetry.units">
                         <option value="auto">Auto — match iRacing</option>
                         <option value="metric">Metric — C, km/h, metres</option>
@@ -116,7 +360,7 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Fuel units:</label>
+                    <label>Fuel units</label>
                     <select v-model="config.telemetry.fuel_units">
                         <option value="auto">Auto — match iRacing (litres or gallons)</option>
                         <option value="litres">Litres</option>
@@ -128,21 +372,10 @@
                         <a :href="docs('units')" target="_blank" rel="noopener">More</a>.
                     </p>
                 </div>
-                <div class="telemetry-grid" v-if="telemetry">
-                    <div><span>Track</span>{{ telemetry.track_name || '—' }}</div>
-                    <div><span>Lap</span>{{ telemetry.current_lap }}</div>
-                    <div><span>Position</span>{{ telemetry.position }}</div>
-                    <div><span>Speed</span>{{ round(telemetry.speed, 0) }} km/h</div>
-                    <div><span>Gear</span>{{ telemetry.gear || '—' }}</div>
-                    <div><span>RPM</span>{{ telemetry.rpm }}</div>
-                    <div><span>Fuel</span>{{ round(telemetry.fuel_level_pct, 0) }}% ({{ round(telemetry.fuel_remaining_laps) }} laps)</div>
-                    <div><span>Flag</span>{{ telemetry.flag }}</div>
-                </div>
-                <p class="hint" v-else>No telemetry yet.</p>
-                            <details class="advanced">
+                <details class="advanced">
                     <summary>Advanced</summary>
                     <div class="form-group">
-                        <label>Poll Interval (s):</label>
+                        <label>Poll Interval (s)</label>
                         <input type="number" v-model.number="config.telemetry.poll_interval" min="0.1" max="5" step="0.1" />
                     </div>
                     <div class="form-group form-toggle with-hint">
@@ -163,7 +396,7 @@
                 <div class="form-group form-toggle with-hint">
                     <input type="checkbox" id="pit-commands"
                            v-model="config.pit_commands.enabled" />
-                    <label for="pit-commands">Enable pit commands — at my own risk</label>
+                    <label for="pit-commands">Enable pit commands</label>
                     <p class="hint hint-keep">
                         Start with <strong>pit stop</strong> and the service is read straight from
                         your words: <em>pit stop four tyres and 30 litres</em> ·
@@ -175,11 +408,10 @@
                     </p>
                 </div>
                 <div class="form-group form-toggle with-hint" v-if="config.pit_commands.enabled">
-                    <input type="checkbox" id="pit-confirm"
-                           v-model="config.pit_commands.confirm_pit_stop_commands" />
-                    <label for="pit-confirm">Ask me to confirm “pit stop …” commands</label>
+                    <input type="checkbox" id="pit-confirm" v-model="skipPitConfirm" />
+                    <label for="pit-confirm">Skip confirmation for “pit stop …” commands</label>
                     <p class="hint hint-keep">
-                        Off: any command starting with <strong>pit stop</strong> is set at once and
+                        On: any command starting with <strong>pit stop</strong> is set at once and
                         read back as set, with no chance to cancel a misheard one — even when the
                         model had to interpret the wording. Commands without <em>pit stop</em> are
                         always confirmed.
@@ -191,7 +423,7 @@
             <section class="settings-section" v-show="tab === 'engineer'">
                 <h2>LLM Provider</h2>
                 <div class="form-group">
-                    <label>Provider:</label>
+                    <label>Provider</label>
                     <select v-model="config.llm.provider">
                         <option value="openrouter">OpenRouter (hosted)</option>
                         <option value="local">Local (Ollama / LM Studio)</option>
@@ -199,27 +431,29 @@
                 </div>
 
                 <div class="form-group">
-                    <label>API Key:</label>
+                    <label>API Key</label>
                     <input
                         type="password"
                         v-model="activeProvider.api_key"
                         :placeholder="apiKeyPlaceholder"
                     />
                     <p class="hint" v-if="config.llm.provider === 'openrouter'">
-                        Get one at openrouter.ai/keys. Saved locally, in plain text.
-                        <a :href="docs('openrouter-default')" target="_blank" rel="noopener">More</a>.
+                        Saved locally, in plain text.
+                        <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">Create a key</a> ·
+                        <a href="https://openrouter.ai/docs/api_reference/authentication" target="_blank" rel="noopener">How keys work</a> ·
+                        <a :href="docs('2-connect-the-engineer--openrouter')" target="_blank" rel="noopener">Setup steps</a>
                     </p>
                     <p class="hint" v-else>Usually blank for Ollama.</p>
                 </div>
 
                 <div class="form-group" v-if="config.llm.provider === 'local'">
-                    <label>Endpoint:</label>
+                    <label>Endpoint</label>
                     <input type="text" v-model="activeProvider.endpoint" />
                     <p class="hint">OpenAI-compatible base URL, including <code>/v1</code>.</p>
                 </div>
 
                 <div class="form-group">
-                    <label>Model:</label>
+                    <label>Model</label>
                     <div class="inline-row">
                         <div class="combo">
                             <input
@@ -253,7 +487,7 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Memory (past turns):</label>
+                    <label>Memory (past turns)</label>
                     <input type="number" v-model.number="config.llm.history_turns" min="0" max="12" />
                     <p class="hint hint-keep">How many past exchanges it remembers, so “and the car behind?” works. Zero makes every question standalone; each turn adds a little cost.</p>
                 </div>
@@ -262,20 +496,17 @@
                     <button class="btn btn-secondary" @click="testLLM" :disabled="testingLLM">
                         {{ testingLLM ? 'Testing…' : 'Test connection' }}
                     </button>
-                    <p v-if="llmTestResult" :class="llmTestResult.ok ? 'result-ok' : 'result-bad'">
-                        {{ llmTestResult.text }}
-                    </p>
                 </div>
 
                 <details class="advanced">
                     <summary>Advanced</summary>
                     <div class="form-group" v-if="config.llm.provider !== 'local'">
-                        <label>Endpoint:</label>
+                        <label>Endpoint</label>
                         <input type="text" v-model="activeProvider.endpoint" />
                         <p class="hint">OpenAI-compatible base URL, including <code>/v1</code>.</p>
                     </div>
                     <div class="form-group">
-                        <label>Temperature:</label>
+                        <label>Temperature</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.llm.temperature" min="0" max="1" step="0.05" />
                             <span class="range-value">{{ config.llm.temperature }}</span>
@@ -283,7 +514,7 @@
                         <p class="hint">How much the wording varies. Ignored by models that do not take one, Claude Haiku 5.5 among them.</p>
                     </div>
                     <div class="form-group">
-                        <label>Max Tokens:</label>
+                        <label>Max Tokens</label>
                         <input type="number" v-model.number="config.llm.max_tokens" min="16" max="500" />
                         <p class="hint">
                             The length cap that keeps race answers to one sentence.
@@ -291,7 +522,7 @@
                         </p>
                     </div>
                     <div class="form-group">
-                        <label>Calculations:</label>
+                        <label>Calculations</label>
                         <select v-model="config.llm.use_tools">
                             <option value="auto">Let the model call them (recommended)</option>
                             <option value="off">Off — fold the numbers into the prompt</option>
@@ -299,7 +530,7 @@
                         <p class="hint">Turn off only for a local model that handles tool calling badly.</p>
                     </div>
                     <div class="form-group">
-                        <label>Timeout (s):</label>
+                        <label>Timeout (s)</label>
                         <input type="number" v-model.number="config.llm.timeout" min="5" max="120" step="1" />
                         <p class="hint">How long to wait for the provider before giving up.</p>
                     </div>
@@ -310,7 +541,7 @@
             <section class="settings-section" v-show="tab === 'engineer'">
                 <h2>Persona</h2>
                 <div class="form-group">
-                    <label>Call me:</label>
+                    <label>Call me</label>
                     <input type="text" v-model="config.driver_callsign"
                            placeholder="Leave blank to use your iRacing name"
                            maxlength="40">
@@ -321,7 +552,7 @@
                 </div>
 
                 <div class="form-group">
-                    <label>System Prompt:</label>
+                    <label>System Prompt</label>
                     <textarea v-model="config.system_prompt" rows="8"></textarea>
                     <p class="hint">
                         How the engineer sounds. The rules against inventing anything are always
@@ -337,7 +568,7 @@
             <section class="settings-section" v-show="tab === 'input'">
                 <h2>Push-to-Talk</h2>
                 <div class="form-group">
-                    <label>Mode:</label>
+                    <label>Mode</label>
                     <select v-model="config.push_to_button.mode">
                         <option value="hold">Hold to talk — records while held</option>
                         <option value="toggle">Toggle — press to open, press again to send</option>
@@ -345,7 +576,7 @@
                     <p class="hint">Toggle frees your thumb mid-corner, like a real pit radio.</p>
                 </div>
                 <div class="form-group">
-                    <label>Maximum recording (s):</label>
+                    <label>Maximum recording (s)</label>
                     <input type="number" v-model.number="config.audio.max_record_seconds"
                            min="2" max="120" step="1" />
                     <p class="hint hint-keep">
@@ -354,7 +585,7 @@
                     </p>
                 </div>
                 <div class="form-group">
-                    <label>Type:</label>
+                    <label>Type</label>
                     <select v-model="config.push_to_button.type">
                         <option value="keyboard">Keyboard key or combination</option>
                         <option value="controller">Sim Wheel / Button Box</option>
@@ -362,16 +593,16 @@
                     <p class="hint result-bad" v-if="inputTypeNotApplied">
                         Not switched yet — still listening on
                         <strong>{{ status.hotkey }}</strong>. Click
-                        <strong>Save Settings</strong> to make this take effect.
+                        <strong>Save</strong> to make this take effect.
                     </p>
                 </div>
 
                 <div class="form-group" v-if="config.push_to_button.type === 'keyboard'">
-                    <label>Key:</label>
+                    <label>Key</label>
                     <div class="inline-row">
                         <span class="binding-display">{{ keyLabel }}</span>
                         <button class="btn btn-secondary" @click="bindKey" :disabled="bindingKey">
-                            {{ bindingKey ? 'Press a key…' : 'Bind a key' }}
+                            {{ bindingKey ? 'Press a key… Esc cancels' : 'Bind a key' }}
                         </button>
                     </div>
                     <p class="hint">
@@ -382,7 +613,7 @@
 
                 <template v-if="config.push_to_button.type === 'controller'">
                     <div class="form-group">
-                        <label>Detected devices:</label>
+                        <label>Detected devices</label>
                         <p class="hint" v-if="!controllers.length">
                             None detected. Make sure the wheel is on and click Refresh.
                         </p>
@@ -394,7 +625,7 @@
                     </div>
 
                     <div class="form-group">
-                        <label>Bound to:</label>
+                        <label>Bound to</label>
                         <p :class="config.push_to_button.button >= 0 ? 'result-ok' : 'hint'">
                             {{ boundDescription }}
                         </p>
@@ -402,7 +633,7 @@
 
                     <div class="form-group inline-row">
                         <button class="btn btn-primary" @click="bindController" :disabled="binding">
-                            {{ binding ? 'Press a button on your wheel…' : 'Bind a button' }}
+                            {{ binding ? 'Press a button on your wheel… Esc cancels' : 'Bind a button' }}
                         </button>
                         <button class="btn btn-secondary" @click="loadControllers" :disabled="binding">
                             Refresh devices
@@ -418,23 +649,29 @@
             <section class="settings-section" v-show="tab === 'voice'">
                 <h2>Voice (ElevenLabs)</h2>
                 <div class="form-group">
-                    <label>API Key:</label>
+                    <label>API Key</label>
                     <input
                         type="password"
                         v-model="config.elevenlabs.api_key"
                         :placeholder="config.elevenlabs.api_key_set ? 'Saved — leave blank to keep' : 'Enter key'"
                     />
-                    <p class="hint">For speech recognition and the voice. Saved locally, in plain text.</p>
+                    <p class="hint">
+                        Saved locally, in plain text. Restricted keys need Speech to Text, Text to
+                        Speech, Voices.
+                        <a href="https://elevenlabs.io/app/developers/api-keys" target="_blank" rel="noopener">Create a key</a> ·
+                        <a href="https://elevenlabs.io/docs/api-reference/authentication" target="_blank" rel="noopener">How keys work</a> ·
+                        <a :href="docs('3-connect-speech-and-choose-a-voice--elevenlabs')" target="_blank" rel="noopener">Setup steps</a>
+                    </p>
                 </div>
                 <div class="form-group">
-                    <label>STT Model:</label>
+                    <label>STT Model</label>
                     <select v-model="config.elevenlabs.stt_model">
                         <option value="scribe_v2">Scribe v2</option>
                     </select>
                     <p class="hint">Speech recognition, biased toward the surnames in your session.</p>
                 </div>
                 <div class="form-group">
-                    <label>TTS Model:</label>
+                    <label>TTS Model</label>
                     <select v-model="config.elevenlabs.tts_model">
                         <option value="eleven_v4_turbo">Eleven v4 Turbo</option>
                         <option value="eleven_v3_conversational">Eleven v3 Conversational</option>
@@ -444,6 +681,11 @@
                     </select>
                     <p class="hint">Flash can ramble after the answer; v4 Turbo stops cleanly at the same price, Multilingual v2 is plainer but costs double.
                         <a :href="docs('choosing-a-speech-model')" target="_blank" rel="noopener">More</a>.</p>
+                </div>
+                <div class="form-group">
+                    <button class="btn btn-secondary" @click="testElevenLabs" :disabled="testingElevenLabs">
+                        {{ testingElevenLabs ? 'Testing…' : 'Test connection' }}
+                    </button>
                 </div>
             </section>
 
@@ -530,10 +772,10 @@
                 <h2>Voice Delivery</h2>
 
                 <div class="callout">
-                    <strong>Voice stuttering or slurring? Go back to Most stable.</strong>
-                    It is these sliders, not your PC — <strong>Style above 0</strong> is
-                    the usual culprit. A single bad take can still happen; say
-                    <strong>“that was gibberish”</strong> and AIRE will regenerate it.
+                    <strong>Words garbled or slurred?</strong> Pick <strong>Most stable</strong>
+                    and keep Style at 0. One bad line: say <strong>“that was gibberish”</strong>
+                    and it's spoken again. Voice keeps talking after the answer? Change the
+                    <strong>TTS Model</strong> above.
                     <div class="preset-row">
                         <button class="btn btn-secondary" @click="applyVoicePreset('stable')">
                             Most stable (default)
@@ -549,11 +791,10 @@
                         <strong>Outside the recommended range:</strong>
                         <span v-for="w in voiceWarnings" :key="w">{{ w }} </span>
                     </p>
-                    <p class="hint" v-else>All settings are inside ElevenLabs' recommended ranges.</p>
                 </div>
 
                 <div class="form-group">
-                    <label>Hard-to-say names:</label>
+                    <label>Hard-to-say names</label>
                     <select v-model="config.elevenlabs.name_policy">
                         <option value="auto">Auto — use the car number when a name looks risky</option>
                         <option value="names">Always use names</option>
@@ -563,26 +804,6 @@
                         Says a name the voice would fight as the car number instead.
                         <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">How it decides</a>.
                     </p>
-                </div>
-
-                <div class="form-group">
-                    <label>Say it like this:</label>
-                    <p class="hint">
-                        Spell a name how it should sound. Only the audio changes.
-                        <a :href="docs('when-the-voice-mangles-a-name')" target="_blank" rel="noopener">More</a>.
-                    </p>
-                    <div v-for="(row, i) in pronunciationRows" :key="i" class="preset-row">
-                        <input type="text" v-model="row.from" placeholder="Kovács"
-                               @change="savePronunciation" style="flex:1">
-                        <span style="opacity:.6">say as</span>
-                        <input type="text" v-model="row.to" placeholder="Kovach"
-                               @change="savePronunciation" style="flex:1">
-                        <button class="btn btn-secondary" @click="removePronunciation(i)"
-                                title="Remove">&times;</button>
-                    </div>
-                    <button class="btn btn-secondary" @click="addPronunciation">
-                        Add a name
-                    </button>
                 </div>
 
                 <div class="form-group inline-row">
@@ -596,7 +817,7 @@
                 <details class="advanced">
                     <summary>Advanced</summary>
                     <div class="form-group">
-                        <label>Stability:</label>
+                        <label>Stability</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.elevenlabs.voice_settings.stability"
                                    min="0" max="1" step="0.05" />
@@ -608,7 +829,7 @@
                         </p>
                     </div>
                     <div class="form-group">
-                        <label>Similarity:</label>
+                        <label>Similarity</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.elevenlabs.voice_settings.similarity_boost"
                                    min="0" max="1" step="0.05" />
@@ -617,7 +838,7 @@
                         <p class="hint">How closely it sticks to the original voice. Below 0.5 it drifts.</p>
                     </div>
                     <div class="form-group">
-                        <label>Speed:</label>
+                        <label>Speed</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.elevenlabs.voice_settings.speed"
                                    min="0.7" max="1.2" step="0.05" />
@@ -626,7 +847,7 @@
                         <p class="hint">Keep to 0.9–1.1; <strong>1.2 is the likeliest cause of slurring.</strong></p>
                     </div>
                     <div class="form-group">
-                        <label>Style exaggeration:</label>
+                        <label>Style exaggeration</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.elevenlabs.voice_settings.style"
                                    min="0" max="1" step="0.05" />
@@ -655,7 +876,7 @@
                     Audio I/O unavailable — install <code>sounddevice</code> and PortAudio.
                 </p>
                 <div class="form-group">
-                    <label>Microphone:</label>
+                    <label>Microphone</label>
                     <select v-model="config.audio.input_device">
                         <option :value="null">System default</option>
                         <option v-for="device in inputDevices" :key="device.id" :value="device.id">
@@ -664,7 +885,7 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Output:</label>
+                    <label>Output</label>
                     <select v-model="config.audio.output_device">
                         <option :value="null">System default</option>
                         <option v-for="device in outputDevices" :key="device.id" :value="device.id">
@@ -677,7 +898,7 @@
                     <label for="ptt-beep">Radio blip when push-to-talk opens and closes</label>
                 </div>
                 <div class="form-group" v-if="config.audio.ptt_beep">
-                    <label>Blip volume:</label>
+                    <label>Blip volume</label>
                     <div class="range-row">
                         <input type="range" v-model.number="config.audio.ptt_beep_volume"
                                min="0" max="1" step="0.05" />
@@ -695,7 +916,7 @@
             <section class="settings-section" v-show="tab === 'audio'">
                 <h2>Engineer Volume &amp; Boost</h2>
                 <div class="form-group">
-                    <label>Engineer voice level:</label>
+                    <label>Engineer voice level</label>
                     <div class="range-row">
                         <input type="range" v-model.number="config.audio.volume" min="0" max="2" step="0.05" />
                         <span class="range-value" :class="{ 'boosting': config.audio.volume > 1 }">
@@ -713,7 +934,7 @@
                     </p>
                 </div>
                 <div class="form-group">
-                    <label>Quickest reply:</label>
+                    <label>Quickest reply</label>
                     <div class="range-row">
                         <input type="range" v-model.number="config.audio.min_reply_seconds"
                                min="0" max="5" step="0.25" />
@@ -738,7 +959,7 @@
                     <a :href="docs('radio-effect')" target="_blank" rel="noopener">More</a>.
                 </p>
                 <div class="form-group">
-                    <label>Intensity (band narrowness + grit):</label>
+                    <label>Intensity (band narrowness + grit)</label>
                     <div class="range-row">
                         <input type="range" v-model.number="config.radio_effect.intensity" min="0" max="1" step="0.05" />
                         <span class="range-value">{{ config.radio_effect.intensity }}</span>
@@ -757,7 +978,7 @@
                 <details class="advanced">
                     <summary>Advanced</summary>
                     <div class="form-group">
-                        <label>Compression (radio AGC):</label>
+                        <label>Compression (radio AGC)</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.radio_effect.compression" min="0" max="1" step="0.05" />
                             <span class="range-value">{{ config.radio_effect.compression }}</span>
@@ -765,7 +986,7 @@
                         <p class="hint">Evens out loud and quiet words; most of the effect.</p>
                     </div>
                     <div class="form-group">
-                        <label>Noise bed:</label>
+                        <label>Noise bed</label>
                         <div class="range-row">
                             <input type="range" v-model.number="config.radio_effect.noise" min="0" max="1" step="0.02" />
                             <span class="range-value">{{ config.radio_effect.noise }}</span>
@@ -777,10 +998,10 @@
                         <label for="radio-squelch">Squelch clicks (mic keying on and off)</label>
                     </div>
                     <div class="form-group">
-                        <label>Bandpass:</label>
+                        <label>Bandpass</label>
                         <div class="filter-controls">
                             <div class="form-group">
-                                <label>Low cut:</label>
+                                <label>Low cut</label>
                                 <div class="range-row">
                                     <input type="range" v-model.number="config.radio_effect.low_cut" min="100" max="1000" step="50" />
                                     <span class="range-value">{{ config.radio_effect.low_cut }} Hz</span>
@@ -788,7 +1009,7 @@
                                 <p class="hint">Raising it thins the voice out.</p>
                             </div>
                             <div class="form-group">
-                                <label>High cut:</label>
+                                <label>High cut</label>
                                 <div class="range-row">
                                     <input type="range" v-model.number="config.radio_effect.high_cut" min="2000" max="6000" step="100" />
                                     <span class="range-value">{{ config.radio_effect.high_cut }} Hz</span>
@@ -814,7 +1035,7 @@
                     <label for="ducking-enabled">Enable ducking</label>
                 </div>
                 <div class="form-group">
-                    <label>Duck Level:</label>
+                    <label>Duck Level</label>
                     <div class="range-row">
                         <input type="range" v-model.number="config.ducking.duck_level" min="0" max="1" step="0.05" />
                         <span class="range-value">{{ config.ducking.duck_level }}</span>
@@ -822,7 +1043,7 @@
                     <p class="hint">The level the other app drops <em>to</em>: 0.15 plays it at 15%.</p>
                 </div>
                 <div class="form-group">
-                    <label>Process:</label>
+                    <label>Process</label>
                     <div class="inline-row">
                         <div class="combo combo-narrow">
                             <input
@@ -851,7 +1072,7 @@
             <section class="settings-section" v-show="tab === 'app'">
                 <h2>Appearance</h2>
                 <div class="form-group">
-                    <label>Theme:</label>
+                    <label>Theme</label>
                     <select v-model="theme" @change="applyTheme">
                         <option value="auto">Auto — follow Windows</option>
                         <option value="dark">Dark</option>
@@ -907,7 +1128,7 @@
                     Saved {{ cacheStats.seconds_served }} seconds of synthesis so far this run.
                 </p>
                 <div class="form-group">
-                    <label>Cache limit (MB):</label>
+                    <label>Cache limit (MB)</label>
                     <input type="number" v-model.number="config.elevenlabs.cache_mb" min="0" max="2048" step="16" />
                     <p class="hint">The oldest phrases are dropped past this. 0 disables the cache.</p>
                 </div>
@@ -915,11 +1136,35 @@
 
             <!-- Exchange log -->
             <section class="settings-section" v-show="tab === 'app'">
-                <h2>Exchange Log</h2>
+                <h2>Radio Log</h2>
+                <div class="form-group form-toggle with-hint">
+                    <input type="checkbox" id="radio-log-enabled" v-model="config.radio_log.enabled" />
+                    <label for="radio-log-enabled">Keep the Radio Log on this PC</label>
+                    <p class="hint">
+                        Questions, answers, warnings and your ratings, in
+                        <code>radio-log.jsonl</code> beside your settings. Off keeps them until AIRE closes.
+                    </p>
+                </div>
                 <div class="form-group">
-                    <label>Entries kept:</label>
-                    <input type="number" v-model.number="config.memory_log" min="1" max="200" />
-                    <p class="hint">Memory only — it changes nothing about what you are billed.</p>
+                    <label>Keep entries for</label>
+                    <select v-model.number="config.radio_log.retention_days">
+                        <option :value="1">1 day</option>
+                        <option :value="7">7 days</option>
+                        <option :value="30">30 days</option>
+                        <option :value="90">90 days</option>
+                        <option :value="0">No time limit</option>
+                    </select>
+                    <p class="hint">Older entries are deleted automatically. The limit below still applies.</p>
+                </div>
+                <div class="form-group">
+                    <label>Entries kept</label>
+                    <input type="number" v-model.number="config.radio_log.keep" min="100" max="5000" step="100" />
+                    <p class="hint">The oldest are dropped past this.</p>
+                </div>
+                <div class="form-group inline-row">
+                    <button class="btn btn-secondary" @click="clearLog" :disabled="!logEntries.length">
+                        Clear the Radio Log…
+                    </button>
                 </div>
             </section>
 
@@ -930,7 +1175,7 @@
                         Restore all settings to defaults
                     </button>
                 </div>
-                <p class="hint">Keeps your API keys, voice, favourites, pronunciations and push-to-talk binding.</p>
+                <p class="hint">Keeps your API keys, voice, favourites and push-to-talk binding.</p>
             </section>
         </main>
 
@@ -938,34 +1183,203 @@
             <p>{{ loading ? 'Loading settings…' : 'Could not load settings.' }}</p>
         </main>
 
-        <!-- Exchange Log Modal -->
+        <!-- Shown only when something differs from what was saved, so a
+             permanently lit Save button stops meaning nothing. -->
+        <div class="save-bar" v-if="dirty" role="status">
+            <span class="save-bar-text">
+                <span class="status-dot"></span>
+                {{ unsavedCount === 1 ? '1 unsaved change' : `${unsavedCount} unsaved changes` }}
+                <span class="save-bar-profile">· {{ activeProfileName }}</span>
+            </span>
+            <button class="btn btn-secondary" @click="discardChanges" :disabled="saving">Discard</button>
+            <button class="btn btn-primary" @click="saveConfig" :disabled="saving">
+                {{ saving ? 'Saving…' : 'Save' }}
+            </button>
+        </div>
+        </div>
+
+        <!-- Profiles Modal -->
         <teleport to="body">
-            <div v-if="showExchangeLog" class="modal">
-                <div class="modal-content">
+            <div v-if="showProfiles" class="modal" @click.self="showProfiles = false">
+                <div class="modal-content profiles-modal">
                     <div class="modal-header">
-                        <h2>Exchange Log</h2>
-                        <button @click="showExchangeLog = false" class="close-btn">&times;</button>
+                        <h2>Driver Profiles</h2>
+                        <button @click="showProfiles = false" class="close-btn" aria-label="Close">&times;</button>
                     </div>
-                    <div class="exchange-log">
-                        <p v-if="!exchangeLog.length">Nothing yet — ask a question to get started.</p>
-                        <div v-for="(log, index) in exchangeLog.slice().reverse()" :key="index" class="log-entry">
-                            <div class="log-header">
-                                <span class="log-time">{{ formatTime(log.timestamp) }}</span>
-                                <span class="log-session" v-if="log.session_kind"
-                                      :title="'iRacing session type: ' + (log.session_type || '(empty)')">
-                                    {{ log.session_type || '(no session type)' }} → {{ log.session_kind }}
-                                </span>
-                                <span class="log-source" :class="log.type">{{ log.type }}</span>
+                    <p class="hint">
+                        Each driver keeps their own voice, persona, units, volume and radio effect.
+                        Keys, model, audio devices and push-to-talk button are shared.
+                        <a :href="docs('driver-profiles')" target="_blank" rel="noopener">More</a>.
+                    </p>
+                    <ul class="profile-list">
+                        <li v-for="p in profiles" :key="p.id"
+                            :class="{ editing: editing && editing.id === p.id, active: p.id === activeProfile }"
+                            :aria-current="p.id === activeProfile ? 'true' : null">
+                            <template v-if="editing && editing.id === p.id">
+                                <div class="badge-editor">
+                                    <span class="avatar large" :class="'badge-' + editing.color">{{ editPreview }}</span>
+                                    <div class="badge-fields">
+                                        <div class="badge-row">
+                                            <input type="text" v-model="editing.name" maxlength="40"
+                                                   placeholder="Name" aria-label="Name"
+                                                   @keyup.enter="saveEdit">
+                                            <input type="text" class="initials-input" v-model="editing.initials"
+                                                   maxlength="2" :placeholder="derivedInitials(editing.name)"
+                                                   aria-label="Initials" title="Two letters; blank uses the name"
+                                                   @keyup.enter="saveEdit">
+                                        </div>
+                                        <div class="swatches" role="radiogroup" aria-label="Colour">
+                                            <button v-for="c in profileColors" :key="c" type="button"
+                                                    class="swatch" :class="['badge-' + c, { on: editing.color === c }]"
+                                                    role="radio" :aria-checked="editing.color === c"
+                                                    :aria-label="c" :title="c" @click="editing.color = c"></button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="badge-actions">
+                                    <button class="btn btn-secondary" @click="editing = null">Cancel</button>
+                                    <button class="btn btn-primary" @click="saveEdit"
+                                            :disabled="!editing.name.trim()">Save</button>
+                                </div>
+                            </template>
+                            <template v-else>
+                                <span class="avatar" :class="'badge-' + p.color">{{ p.initials }}</span>
+                                <span class="profile-list-name">{{ p.name }}</span>
+                                <button class="btn btn-secondary" v-if="p.id !== activeProfile" :disabled="switchingProfile"
+                                        @click="requestSwitch(p.id)">Switch</button>
+                                <button class="icon-btn" title="Edit name and badge" aria-label="Edit"
+                                        @click="startEdit(p)">
+                                    <svg class="icon"><use href="#i-pencil"/></svg>
+                                </button>
+                                <button class="icon-btn danger" aria-label="Delete"
+                                        :title="p.id === activeProfile ? 'Switch away before deleting' : 'Delete'"
+                                        :disabled="p.id === activeProfile" @click="deleteProfile(p)">
+                                    <svg class="icon"><use href="#i-trash-2"/></svg>
+                                </button>
+                            </template>
+                        </li>
+                    </ul>
+                    <div class="new-profile">
+                        <span class="avatar" :class="'badge-' + newProfileColor">{{ derivedInitials(newProfileName) }}</span>
+                        <input type="text" ref="newProfileInput" v-model="newProfileName" maxlength="40"
+                               placeholder="New driver's name" @keyup.enter="createProfile">
+                        <button class="btn btn-primary btn-icon" @click="createProfile"
+                                :disabled="!newProfileName.trim()">
+                            <svg class="icon"><use href="#i-plus"/></svg>Add
+                        </button>
+                    </div>
+                    <div class="swatches new-swatches" role="radiogroup" aria-label="New profile colour">
+                        <button v-for="c in profileColors" :key="c" type="button"
+                                class="swatch" :class="['badge-' + c, { on: newProfileColor === c }]"
+                                role="radio" :aria-checked="newProfileColor === c"
+                                :aria-label="c" :title="c" @click="newProfileColor = c"></button>
+                    </div>
+                </div>
+            </div>
+        </teleport>
+
+        <!-- Clear the Radio Log: everything, or only entries older than a
+             cutoff. Every choice is always listed; one that would remove
+             nothing is shown disabled rather than hidden, or a fresh log
+             offers only "Everything" and the rest look missing. -->
+        <teleport to="body">
+            <div v-if="clearOpen" class="modal" @click.self="clearOpen = false">
+                <div class="modal-content confirm-modal clear-modal" role="dialog" aria-modal="true"
+                     aria-label="Clear the Radio Log">
+                    <div class="modal-header">
+                        <h2>Clear the Radio Log</h2>
+                    </div>
+                    <div class="clear-choices" role="radiogroup" aria-label="What to delete">
+                        <label v-for="c in clearChoices" :key="c.key" class="clear-choice"
+                               :class="{ off: !c.count, on: clearChoice === c.key }">
+                            <input type="radio" name="clear-choice" :value="c.key"
+                                   v-model="clearChoice" :disabled="!c.count">
+                            <span class="clear-label">{{ c.label }}</span>
+                            <span class="clear-count">{{ c.count || 'nothing' }}</span>
+                        </label>
+                    </div>
+                    <div class="confirm-actions">
+                        <button class="btn btn-secondary" @click="clearOpen = false">Cancel</button>
+                        <button class="btn btn-danger" @click="runClear"
+                                :disabled="!clearCount || clearing">
+                            {{ clearing ? 'Deleting…' : `Delete ${clearCount} ${clearCount === 1 ? 'entry' : 'entries'}` }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </teleport>
+
+        <!-- Confirmations. In-app rather than the browser confirm box, which in
+             the desktop window is titled with the server's address. -->
+        <teleport to="body">
+            <div v-if="dialog" class="modal" @click.self="closeDialog(null)">
+                <div class="modal-content confirm-modal" role="alertdialog" aria-modal="true"
+                     :aria-label="dialog.title">
+                    <div class="modal-header">
+                        <h2>{{ dialog.title }}</h2>
+                    </div>
+                    <p class="confirm-message">{{ dialog.message }}</p>
+                    <div class="confirm-actions">
+                        <button class="btn btn-secondary" ref="dialogCancel"
+                                @click="closeDialog(null)">Cancel</button>
+                        <button v-for="a in dialog.actions" :key="a.value" class="btn"
+                                :class="a.kind === 'danger' ? 'btn-danger' : (a.kind === 'primary' ? 'btn-primary' : 'btn-secondary')"
+                                @click="closeDialog(a.value)">{{ a.label }}</button>
+                    </div>
+                </div>
+            </div>
+        </teleport>
+
+        <!-- Export the Radio Log as a feedback bundle -->
+        <teleport to="body">
+            <div v-if="exportOpen" class="modal" @click.self="exportOpen = false">
+                <div class="modal-content confirm-modal export-modal" role="dialog" aria-modal="true"
+                     aria-label="Export the Radio Log">
+                    <div class="modal-header">
+                        <h2>{{ exportResult ? 'Exported' : 'Export the Radio Log' }}</h2>
+                    </div>
+                    <template v-if="!exportResult">
+                        <p class="confirm-message">
+                            A .zip of the {{ filteredLog.length }}
+                            {{ filteredLog.length === 1 ? 'entry' : 'entries' }} shown, with your
+                            ratings and notes, the app version and the settings that shape an answer —
+                            ready to attach to a bug report.
+                        </p>
+                        <div class="export-options">
+                            <div class="form-group form-toggle">
+                                <input type="checkbox" id="export-aire-log" v-model="exportAireLog" />
+                                <label for="export-aire-log">Include aire.log (warnings and errors)</label>
                             </div>
-                            <div class="log-content">
-                                <p v-if="log.question"><strong>You:</strong> {{ log.question }}</p>
-                                <p v-if="log.answer"><strong>Engineer:</strong> {{ log.answer }}</p>
-                            </div>
-                            <div class="log-buttons">
-                                <button @click="copyText(log.question + '\n' + log.answer)">Copy</button>
+                            <div class="form-group form-toggle" v-if="traceAvailable">
+                                <input type="checkbox" id="export-trace" v-model="exportTrace" />
+                                <label for="export-trace">Include the diagnostic telemetry trace</label>
                             </div>
                         </div>
-                    </div>
+                        <p class="export-privacy">
+                            Contains your questions, the engineer's answers and other drivers' names.
+                            Never your API keys.
+                        </p>
+                        <div class="confirm-actions">
+                            <button class="btn btn-secondary" @click="exportOpen = false">Cancel</button>
+                            <button class="btn btn-primary btn-icon" @click="runExport" :disabled="exporting">
+                                <svg class="icon"><use href="#i-download"/></svg>
+                                {{ exporting ? 'Exporting…' : 'Export' }}
+                            </button>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <p class="confirm-message">
+                            Saved <strong>{{ exportResult.name }}</strong>
+                        </p>
+                        <p class="export-path"><code>{{ exportResult.path }}</code></p>
+                        <div class="confirm-actions">
+                            <button class="btn btn-secondary" @click="copyText(exportResult.path)">Copy path</button>
+                            <button class="btn btn-secondary btn-icon" @click="revealExport">
+                                <svg class="icon"><use href="#i-folder-open"/></svg>Show in folder
+                            </button>
+                            <button class="btn btn-primary" @click="exportOpen = false">Done</button>
+                        </div>
+                    </template>
                 </div>
             </div>
         </teleport>

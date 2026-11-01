@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REQUIREMENTS = ROOT / "requirements.txt"
 DEFAULT_OUTPUT = ROOT / "THIRD_PARTY_NOTICES.txt"
 VUE_LICENSE = ROOT / "ai_race_engineer" / "static" / "vendor" / "VUE-LICENSE.txt"
+LUCIDE_LICENSE = ROOT / "ai_race_engineer" / "static" / "vendor" / "LUCIDE-LICENSE.txt"
 
 
 def _runtime_distributions(requirements_path: Path):
@@ -92,6 +93,14 @@ def render_notices(requirements_path: Path = DEFAULT_REQUIREMENTS) -> str:
         "",
         "[VUE-LICENSE.txt]",
         VUE_LICENSE.read_text(encoding="utf-8").strip(),
+        "",
+        "-" * 78,
+        "Lucide icons 0.460.0 (inlined into panel.html)",
+        "Project: https://lucide.dev/",
+        "Declared license: ISC",
+        "",
+        "[LUCIDE-LICENSE.txt]",
+        LUCIDE_LICENSE.read_text(encoding="utf-8").strip(),
         "",
     ])
     return "\n".join(sections)

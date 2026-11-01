@@ -20,6 +20,12 @@ class InputUnavailable(RuntimeError):
     """Raised when a global hotkey listener cannot be installed."""
 
 
+class CaptureCancelled(Exception):
+    """A bind capture the driver called off — Esc on the keyboard, or the
+    panel's cancel for a wheel. Distinct from a timeout, which returns None
+    and is reported as nothing having been pressed."""
+
+
 # Modifier keys report left/right variants, but nobody binds "the right ctrl
 # specifically" — they bind ctrl. Both sides collapse to one name so a
 # combination works whichever hand you use.
@@ -253,6 +259,10 @@ class PushToButton:
 
         Runs against a listener of its own so it works whether or not
         push-to-talk is currently bound to anything.
+
+        Esc cancels, raising CaptureCancelled. The listener is global, so it
+        works with the sim focused as well as the panel. Esc cannot be bound
+        as a result, which costs nothing: it opens the sim's menus.
         """
         if not HAS_PYNPUT:
             return None
@@ -260,10 +270,15 @@ class PushToButton:
 
         event = threading.Event()
         keys: Set[str] = set()
+        cancelled = []
 
         def on_press(key):
             name = key_name(key)
             if name is None:
+                return
+            if name == "esc":
+                cancelled.append(True)
+                event.set()
                 return
             keys.add(name)
             if name not in MODIFIERS:
@@ -285,6 +300,8 @@ class PushToButton:
                 return None
         finally:
             listener.stop()
+        if cancelled:
+            raise CaptureCancelled()
         return "+".join(parse_binding("+".join(keys))) if keys else None
 
     def _listen_controller(self) -> None:

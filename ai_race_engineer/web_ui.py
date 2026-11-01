@@ -3,6 +3,10 @@
 import asyncio
 import ipaddress
 import logging
+import os
+import re
+import subprocess
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -12,11 +16,12 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__
+from . import __version__, log_export
 from .audio_handler import AudioPlayer, AudioRecorder, audio_available, wav_bytes_from_pcm
 from .config import AppConfig
 from .llm import LLMClient, LLMError
 from .orchestrator import Orchestrator
+from .profiles import COLORS, ProfileError
 from .resources import STATIC_DIR, UI_DIR
 from .tts import TTS, TTSError
 
@@ -25,6 +30,13 @@ logger = logging.getLogger("race-engineer")
 # Requests that only read. Everything else can change settings, spend money
 # at a provider, or write to the sim, so it has to prove where it came from.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: Longest feedback note kept. A note is a line of what went wrong, not a report.
+_FEEDBACK_NOTE_MAX = 500
+
+#: The "clear older than" choices the panel offers: an hour, a day, a week,
+#: 30 days. Hours, so the shortest is useful in a log that is a day old.
+_CLEAR_OLDER_THAN_HOURS = (1, 24, 168, 720)
 
 #: Default bind address, mirrored from the CLI. Kept as a literal rather than
 #: imported so this module does not depend on the command line.
@@ -158,6 +170,73 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         orch.apply_config()
         return {"status": "ok", "path": str(config.path), "config": config.redacted_dict()}
 
+    # ── Driver profiles ─────────────────────────────────────────────
+
+    def profile_listing() -> Dict[str, Any]:
+        store = config.profiles()
+        # An install that has not saved since profiles arrived has no file
+        # for the profile it is running; its current settings are that one.
+        if not store.exists(config.active_profile):
+            store.write(config.active_profile, config.profile_values())
+        return {"active": config.active_profile, "profiles": store.list(),
+                "colors": list(COLORS)}
+
+    def profile_call(fn, *args):
+        try:
+            return fn(*args)
+        except ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"Could not write the profile: {exc}") from exc
+
+    @app.get("/api/profiles")
+    async def profiles() -> Dict[str, Any]:
+        return profile_call(profile_listing)
+
+    @app.post("/api/profiles")
+    async def create_profile(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """A new profile on the shipped settings. It is not switched to.
+        With no voice chosen it speaks in the default one, never silence."""
+        profile_id = profile_call(
+            config.profiles().create, payload.get("name"), config.default_profile_values(),
+            payload.get("initials", ""), payload.get("color"))
+        return {"ok": True, "id": profile_id, **profile_call(profile_listing)}
+
+    @app.post("/api/profiles/{profile_id}/activate")
+    async def activate_profile(profile_id: str) -> Dict[str, Any]:
+        store = config.profiles()
+        target = profile_call(store.read, profile_id)
+        if target is None:
+            raise HTTPException(404, f"No profile {profile_id!r}.")
+        if profile_id != config.active_profile:
+            busy = orch.busy()
+            if busy:
+                raise HTTPException(409, f"Can't switch driver now. {busy}")
+            # The profile being left keeps what it was running with.
+            profile_call(store.write, config.active_profile, config.profile_values())
+            config.apply_profile(profile_id, target["settings"])
+            _save(config)
+            orch.apply_config()
+        return {"ok": True, **profile_call(profile_listing)}
+
+    @app.post("/api/profiles/{profile_id}/edit")
+    async def edit_profile(profile_id: str,
+                           payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Name and badge. Initials left blank are taken from the name."""
+        profile_call(config.profiles().edit, profile_id, payload.get("name"),
+                     payload.get("initials", ""), payload.get("color"))
+        return {"ok": True, **profile_call(profile_listing)}
+
+    @app.post("/api/profiles/{profile_id}/delete")
+    async def delete_profile(profile_id: str) -> Dict[str, Any]:
+        store = config.profiles()
+        if profile_id == config.active_profile:
+            raise HTTPException(409, "Switch to another profile before deleting this one.")
+        if not profile_call(store.exists, profile_id):
+            raise HTTPException(404, f"No profile {profile_id!r}.")
+        profile_call(store.delete, profile_id)
+        return {"ok": True, **profile_call(profile_listing)}
+
     # ── Status, telemetry, exchange log ─────────────────────────────
 
     @app.get("/api/status")
@@ -210,9 +289,87 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         """
         return await asyncio.to_thread(orch.telemetry.session_yaml, key)
 
+    # ── Radio Log ───────────────────────────────────────────────────
+
+    radio_log = orch.radio_log
+    app.state.export_dir = None     # None: Downloads; tests point it elsewhere
+
+    def export_folder() -> Path:
+        return Path(app.state.export_dir or log_export.export_dir(config.path.parent))
+
     @app.get("/api/log")
-    async def exchange_log() -> List[Dict[str, Any]]:
-        return orch.history()
+    async def log_entries(since_rev: int = 0) -> Dict[str, Any]:
+        """What changed since `since_rev`. `reset` means the log was cleared
+        after that, so the reader should drop what it holds; `count` is how
+        many entries the log keeps, so a reader can drop what aged out."""
+        return {
+            "rev": radio_log.rev,
+            "reset": since_rev > 0 and radio_log.cleared_rev > since_rev,
+            "count": len(radio_log),
+            "entries": radio_log.entries(since_rev),
+            "trace_available": (config.path.parent / "diagnostic-trace.jsonl").is_file(),
+        }
+
+    @app.post("/api/log/{entry_id}/feedback")
+    async def log_feedback(entry_id: str,
+                           payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Thumbs up or down, and a note. Both empty clears it."""
+        entry = radio_log.get(entry_id)
+        if entry is None or entry.get("kind") != "exchange":
+            raise HTTPException(404, "No such exchange in the log.")
+        rating = payload.get("rating")
+        if rating not in ("up", "down", None):
+            raise HTTPException(400, "Rating must be up, down or empty.")
+        note = " ".join(str(payload.get("note") or "").split())[:_FEEDBACK_NOTE_MAX]
+        feedback = ({"rating": rating, "note": note,
+                     "at": datetime.now(timezone.utc).isoformat()}
+                    if rating or note else None)
+        return {"ok": True, "entry": radio_log.patch(entry_id, {"feedback": feedback})}
+
+    @app.post("/api/log/clear")
+    async def log_clear(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+        """Everything, or with `older_than_hours` only the entries older than that."""
+        hours = (payload or {}).get("older_than_hours")
+        if hours is None:
+            removed = len(radio_log)
+            radio_log.clear()
+        elif hours in _CLEAR_OLDER_THAN_HOURS and not isinstance(hours, bool):
+            removed = radio_log.prune(timedelta(hours=hours))
+        else:
+            raise HTTPException(400, "older_than_hours must be 1, 24, 168 or 720.")
+        return {"ok": True, "rev": radio_log.rev, "removed": removed}
+
+    @app.post("/api/log/export")
+    async def log_export_bundle(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
+        """Write the feedback bundle for the given entries, in log order."""
+        wanted = payload.get("ids")
+        entries = radio_log.entries()
+        if isinstance(wanted, list):
+            chosen = set(wanted)
+            entries = [e for e in entries if e["id"] in chosen]
+        if not entries:
+            raise HTTPException(400, "Nothing to export.")
+        try:
+            path = await asyncio.to_thread(
+                log_export.write_bundle, config, entries, export_folder(),
+                bool(payload.get("include_aire_log", True)),
+                bool(payload.get("include_trace", False)))
+        except OSError as exc:
+            raise HTTPException(500, f"Could not write the export: {exc}") from exc
+        return {"ok": True, "name": path.name, "path": str(path), "entries": len(entries)}
+
+    @app.post("/api/log/export/reveal")
+    async def log_export_reveal(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Show an export in Explorer. Only a bundle this app wrote, by name:
+        a path from the request would let any caller open anything."""
+        name = str(payload.get("name") or "")
+        path = export_folder() / name
+        if not log_export.NAME_PATTERN.match(name) or not path.is_file():
+            raise HTTPException(404, "No such export.")
+        if os.name != "nt":
+            return {"ok": False, "path": str(path)}
+        subprocess.Popen(["explorer", f"/select,{path}"])
+        return {"ok": True, "path": str(path)}
 
     # ── Ask (the pipeline, driven from the browser) ─────────────────
 
@@ -234,13 +391,16 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
     # ── LLM ─────────────────────────────────────────────────────────
 
     @app.get("/api/llm/models")
-    async def llm_models() -> Dict[str, Any]:
-        """Live model catalogue from the active provider."""
+    @app.post("/api/llm/models")
+    async def llm_models(payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+        """Live model catalogue from the provider in the panel, saved or not."""
+        trial = _trial_config(config, payload, "llm")
+
         # Closed explicitly: these clients are built per request, and an
         # abandoned one holds its TLS connection until the garbage collector
         # happens to run.
         def fetch() -> List[Dict[str, str]]:
-            with closing(LLMClient(config)) as client:
+            with closing(LLMClient(trial)) as client:
                 return client.list_models()
 
         try:
@@ -249,16 +409,32 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
             raise HTTPException(502, str(exc)) from exc
 
     @app.post("/api/llm/test")
-    async def llm_test() -> Dict[str, Any]:
-        """Round-trip a tiny prompt to validate provider + key + model."""
+    async def llm_test(payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+        """Round-trip a tiny prompt to validate provider + key + model.
+
+        Tests what the panel is showing, saved or not, and saves nothing:
+        testing used to save every setting first, so a test was also an
+        unannounced "Save" of whatever else had been changed.
+        """
+        trial = _trial_config(config, payload, "llm")
+
         def round_trip() -> Dict[str, Any]:
-            with closing(LLMClient(config)) as client:
+            with closing(LLMClient(trial)) as client:
                 return client.test_connection()
 
         try:
             return await asyncio.to_thread(round_trip)
         except LLMError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+            return JSONResponse({"ok": False, "error": _readable_error(str(exc))},
+                                status_code=502)
+
+    @app.post("/api/elevenlabs/test")
+    async def elevenlabs_test(payload: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+        """Check the key does all three things AIRE needs, unsaved settings
+        included, saving nothing. See `_elevenlabs_checks`."""
+        trial = _trial_config(config, payload, "elevenlabs")
+        checks = await asyncio.to_thread(_elevenlabs_checks, trial)
+        return {"ok": all(c["ok"] for c in checks), "checks": checks}
 
     # ── Audio devices ───────────────────────────────────────────────
 
@@ -339,13 +515,16 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
     @app.post("/api/keyboard/bind")
     async def bind_key(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
         """Wait for the next key or combination and bind push-to-talk to it."""
-        from .input_handler import HAS_PYNPUT, describe_binding
+        from .input_handler import HAS_PYNPUT, CaptureCancelled, describe_binding
 
         if not HAS_PYNPUT:
             raise HTTPException(503, "Global hotkeys unavailable on this machine")
 
         timeout = float(payload.get("timeout", 15.0))
-        spec = await asyncio.to_thread(orch.push_to_button.capture_next_key, timeout)
+        try:
+            spec = await asyncio.to_thread(orch.push_to_button.capture_next_key, timeout)
+        except CaptureCancelled:
+            return {"ok": False, "cancelled": True}
         if not spec:
             return {"ok": False, "error": f"No key pressed within {timeout:.0f}s"}
 
@@ -354,17 +533,29 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         orch.apply_config()
         return {"ok": True, "key": spec, "label": describe_binding(spec)}
 
+    @app.post("/api/controllers/bind/cancel")
+    async def cancel_controller_bind() -> Dict[str, Any]:
+        """Call off a waiting wheel bind. A wheel has no Esc, so the panel
+        sends this when Esc is pressed there."""
+        from .controller import ControllerHub
+
+        return {"ok": True, "cancelled": ControllerHub.instance().cancel_capture()}
+
     @app.post("/api/controllers/bind")
     async def bind_controller(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
         """Wait for the next wheel button press and bind push-to-talk to it."""
         from .controller import ControllerHub
+        from .input_handler import CaptureCancelled
 
         timeout = float(payload.get("timeout", 15.0))
         hub = ControllerHub.instance()
         if not await asyncio.to_thread(hub.start):
             raise HTTPException(503, hub.error or "Controller support unavailable")
 
-        binding = await asyncio.to_thread(hub.capture_next_press, timeout)
+        try:
+            binding = await asyncio.to_thread(hub.capture_next_press, timeout)
+        except CaptureCancelled:
+            return {"ok": False, "cancelled": True}
         if binding is None:
             return {"ok": False, "error": f"No button pressed within {timeout:.0f}s"}
 
@@ -482,6 +673,101 @@ def create_app(config: AppConfig, orchestrator: Optional[Orchestrator] = None,
         return {"status": "ok", "audio": audio_available(), "config": str(config.path)}
 
     return app
+
+
+def _trial_config(config: AppConfig, payload: Optional[Dict[str, Any]],
+                  section: str) -> AppConfig:
+    """The config with the panel's unsaved `section` applied, for a test.
+
+    A copy, never saved and never the live one. A key left blank in the
+    panel falls back to the saved key, the same rule a save follows, so
+    "test the key I just typed" and "test what is saved" both work.
+    """
+    trial = AppConfig(config.to_dict(), path=config.path)
+    patch = (payload or {}).get(section)
+    if isinstance(patch, dict):
+        trial.update({section: patch})
+    return trial
+
+
+def _readable_error(text: str) -> str:
+    """A provider error as a person reads it.
+
+    The clients quote the response body, which for ElevenLabs is JSON —
+    `{"detail": {"status": "missing_permissions", "message": "The API key
+    you used is missing the permission text_to_speech…"}}` — and the
+    sentence in it is the whole point of testing a restricted key. A 401 is
+    named for what it is: OpenRouter answers a wrong key with "Missing
+    Authentication header", which reads as if no key was sent.
+    """
+    import json as _json
+
+    head, _, body = text.partition(": ")
+    message = text
+    if body.lstrip().startswith("{"):
+        try:
+            detail = _json.loads(body).get("detail", {})
+            if isinstance(detail, dict) and detail.get("message"):
+                message = f"{head}: {detail['message']}"
+            elif isinstance(detail, str):
+                message = f"{head}: {detail}"
+        except (ValueError, AttributeError):
+            pass
+    # Both shapes: "ElevenLabs returned 401: …" and OpenRouter's "401 from
+    # https://…: …", where the code leads.
+    if re.search(r"\b401\b", head):
+        message = f"Key rejected — {message}"
+    return message
+
+
+#: Spoken, then heard back. Short, so the test costs a few characters and
+#: about a second of transcription; cached after the first, so repeats cost
+#: only the transcription.
+_RADIO_CHECK = "Radio check."
+
+
+def _elevenlabs_checks(config: AppConfig) -> List[Dict[str, Any]]:
+    """Voices, speech, recognition: each a separate permission on a
+    restricted key, so each is reported on its own rather than as one
+    pass/fail that hides which one is missing. Recognition transcribes the
+    speech just made, so passing it proves the whole round trip."""
+    from .stt import STT, STTError
+
+    checks: List[Dict[str, Any]] = []
+
+    def record(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+
+    with closing(_tts(config)) as tts:
+        try:
+            voices = tts.list_voices()
+            record("Voices", True, f"{len(voices)} available")
+        except TTSError as exc:
+            record("Voices", False, _readable_error(str(exc)))
+
+        try:
+            pcm = tts.synthesize(_RADIO_CHECK)
+            record("Speech", True,
+                   "replayed from cache" if tts.last_from_cache else "synthesized")
+        except TTSError as exc:
+            record("Speech", False, _readable_error(str(exc)))
+            record("Recognition", False, "Skipped: needs the speech check to pass.")
+            return checks
+
+    el = config.elevenlabs
+    with closing(STT(config.elevenlabs_key(), model=el.get("stt_model", "scribe_v2"),
+                     language=config.get("language", "en"))) as stt:
+        try:
+            heard = stt.transcribe_raw_result(
+                wav_bytes_from_pcm(pcm, tts.sample_rate), "radio-check.wav").text
+        except STTError as exc:
+            record("Recognition", False, _readable_error(str(exc)))
+            return checks
+    if "radio" in heard.lower():
+        record("Recognition", True, f"heard “{heard.strip()}”")
+    else:
+        record("Recognition", False, f"heard “{heard.strip()}”, expected “{_RADIO_CHECK}”")
+    return checks
 
 
 def _save(config: AppConfig) -> None:

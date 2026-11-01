@@ -9,3 +9,10 @@
 
 To update it, inspect the new package, change the versioned filename and HTML
 reference together, retain the license, and run `tests/test_release_packaging.py`.
+
+## Lucide icons
+
+The panel's icons are path data from `lucide-static@0.460.0`
+(<https://unpkg.com/lucide-static@0.460.0/icons/>), inlined as `<symbol>`s at
+the top of `panel.html` so the panel needs no network. License: ISC;
+reproduced in `LUCIDE-LICENSE.txt`.

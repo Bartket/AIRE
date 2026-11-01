@@ -24,6 +24,7 @@ from .config import AppConfig
 from .ducking import AudioDuck
 from .input_handler import InputUnavailable, PushToButton
 from .llm import COMMS_FAILURE, NO_ANSWER, LLMClient
+from .radio_log import FILE_NAME as RADIO_LOG_FILE, RadioLog
 from .pit_commands import (PitCommandError, PitCommandPlan,
                            is_pit_command, might_be_pit_instruction,
                            parse_pit_command, pit_amounts_match)
@@ -254,8 +255,18 @@ class Orchestrator:
         self.push_to_button.on_release = self._on_button_up
         self.ducking = AudioDuck(config)
 
-        # Rolling log of exchanges, surfaced by the web UI.
-        self._history: Deque[Dict[str, Any]] = deque(maxlen=max(1, config.get("memory_log", 20)))
+        # Every exchange and warning, surfaced by the panel's Radio Log and
+        # kept on disk unless switched off. See radio_log.py.
+        settings = config.get("radio_log", {}) or {}
+        self.radio_log = RadioLog(
+            config.path.parent / RADIO_LOG_FILE,
+            enabled=settings.get("enabled", True) is True,
+            keep=settings.get("keep", 1000),
+            retention_days=settings.get("retention_days", 30))
+        self._log_handler: Optional[logging.Handler] = None
+        # The exchange this turn logged, finished off once speech is done.
+        self._pending_log_id: Optional[str] = None
+        self._turn_speech_cached: Optional[bool] = None
 
     # ── Settings read live, never cached ────────────────────────────
 
@@ -292,6 +303,9 @@ class Orchestrator:
         self._running = True
         self._loop = asyncio.get_running_loop()
         self._status = "listening"
+        if self._log_handler is None:
+            self._log_handler = self.radio_log.handler()
+            logging.getLogger().addHandler(self._log_handler)
 
         try:
             self.push_to_button.start()
@@ -343,6 +357,9 @@ class Orchestrator:
                 pass
             self._task = None
         self.telemetry.shutdown()
+        if self._log_handler is not None:
+            logging.getLogger().removeHandler(self._log_handler)
+            self._log_handler = None
         logger.info("Orchestrator stopped")
 
     async def _telemetry_loop(self) -> None:
@@ -418,6 +435,20 @@ class Orchestrator:
             return None
         return (time.monotonic() - self._snapshot_at) * 1000
 
+    def busy(self) -> Optional[str]:
+        """Why switching driver profile has to wait, or None if it need not.
+
+        A switch swaps the voice and the pit-command opt-in. Mid-answer that
+        changes the voice under the sentence being spoken; with a pit command
+        awaiting confirmation it would leave the read-back for one driver to
+        be confirmed under another's settings.
+        """
+        if self._pending_pit_command is not None:
+            return "A pit command is waiting for confirm or cancel."
+        if self._status in ("recording", "thinking", "speaking"):
+            return f"The engineer is {self._status}."
+        return None
+
     def status(self) -> Dict[str, Any]:
         settings = self.config.llm_settings()
         return {
@@ -446,6 +477,7 @@ class Orchestrator:
             "pit_commands_enabled": (
                 self.config.get("pit_commands", {}).get("enabled") is True),
             "pit_command_pending": self._pending_pit_command is not None,
+            "profile": self.config.active_profile,
             # Stage milliseconds for the last completed exchange. Served on
             # /api/status for diagnostics; nothing in the panel renders it
             # yet, so this is read with a request, not watched on screen.
@@ -453,16 +485,35 @@ class Orchestrator:
         }
 
     def history(self) -> List[Dict[str, Any]]:
-        return list(self._history)
+        """The exchanges in the Radio Log, oldest first."""
+        return [e for e in self.radio_log.entries() if e.get("kind") == "exchange"]
 
     def _log_exchange(self, question: str, answer: str, kind: str = "voice",
-                      snapshot: Optional[TelemetrySnapshot] = None) -> Dict[str, Any]:
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+                      snapshot: Optional[TelemetrySnapshot] = None,
+                      transcription: Optional[Transcription] = None,
+                      route: Optional[str] = None) -> Dict[str, Any]:
+        """Record one exchange with what it takes to debug it later.
+
+        Timings, whether speech came from the cache and token use are only
+        known once the turn is over; `_finish_log_entry` adds them.
+        """
+        settings = self.config.llm_settings()
+        entry: Dict[str, Any] = {
+            "kind": "exchange",
             "type": kind,
             "question": question,
             "answer": answer,
+            "route": route,
+            "failed": answer == COMMS_FAILURE,
+            "model": f"{settings['provider']}/{settings['model']}",
+            "profile": self.config.active_profile,
         }
+        if transcription is not None:
+            entry["transcription"] = {
+                "language_code": transcription.language_code,
+                "language_probability": transcription.language_probability,
+                "mean_word_logprob": transcription.mean_word_logprob,
+            }
         if snapshot is not None:
             # Which session the answer was written for. A practice session
             # answered like a race left no way to tell whether the wording
@@ -473,8 +524,29 @@ class Orchestrator:
             session_type = snapshot.track.session_type
             entry["session_type"] = session_type
             entry["session_kind"] = session_kind(session_type)
-        self._history.append(entry)
-        return entry
+        logged = self.radio_log.add(entry)
+        self._pending_log_id = logged["id"]
+        self._turn_speech_cached = None
+        return dict(logged)
+
+    def _finish_log_entry(self) -> None:
+        """Add what the turn knew only at its end. Never raises."""
+        entry_id, self._pending_log_id = self._pending_log_id, None
+        if entry_id is None:
+            return
+        try:
+            fields: Dict[str, Any] = {}
+            if self._timings is not None:
+                fields["timings"] = self._timings.as_dict()
+            if self._turn_speech_cached is not None:
+                fields["speech_cached"] = self._turn_speech_cached
+            usage = self.llm.last_usage
+            if usage:
+                fields["usage"] = usage
+            if fields:
+                self.radio_log.patch(entry_id, fields)
+        except Exception:
+            logger.exception("Could not finish the Radio Log entry")
 
     def _remember_trace_sample(self, snapshot: Optional[TelemetrySnapshot]) -> None:
         """Keep one bounded minute of the readings behind strategy answers."""
@@ -770,7 +842,8 @@ class Orchestrator:
                     transcription.mean_word_logprob,
                     transcription.language_probability,
                 )
-                self._log_exchange(question, NO_ANSWER, "voice")
+                self._log_exchange(question, NO_ANSWER, "voice", None,
+                                   transcription, "stt_guard")
                 self._write_diagnostic_trace(
                     question, NO_ANSWER, "voice", await self.snapshot_now(),
                     transcription, "stt_guard")
@@ -787,6 +860,7 @@ class Orchestrator:
             if self._timings is not None:
                 self._last_timings = self._timings.as_dict()
             self._flush_trace()
+            self._finish_log_entry()
             self._status = "listening"
             self._busy.release()
 
@@ -831,7 +905,8 @@ class Orchestrator:
                 # remainder of a window that is already running out.
                 previous = self._last_spoken_text
                 answer = previous or "I've got nothing to repeat yet."
-                entry = self._log_exchange(question, answer, kind)
+                entry = self._log_exchange(question, answer, kind, None,
+                                           _transcription, "repeat")
                 self._write_diagnostic_trace(
                     question, answer, kind, None, _transcription, "repeat")
                 logger.info("Repeat request: %r", answer)
@@ -850,7 +925,8 @@ class Orchestrator:
             pit_result = await self._handle_pit_command(question)
             if pit_result is not None:
                 answer, route = pit_result
-                entry = self._log_exchange(question, answer, kind, snapshot)
+                entry = self._log_exchange(question, answer, kind, snapshot,
+                                           _transcription, route)
                 self._write_diagnostic_trace(
                     question, answer, kind, snapshot, _transcription, route)
                 logger.info("Pit command route %s: %r", route, answer)
@@ -864,7 +940,8 @@ class Orchestrator:
 
             with self._timings.stage("llm"):
                 answer = await asyncio.to_thread(self.llm.generate, question, snapshot)
-            entry = self._log_exchange(question, answer, kind, snapshot)
+            entry = self._log_exchange(question, answer, kind, snapshot,
+                                       _transcription, self.llm.last_route)
             self._write_diagnostic_trace(
                 question, answer, kind, snapshot, _transcription,
                 self.llm.last_route)
@@ -888,6 +965,7 @@ class Orchestrator:
             if self._timings is not None:
                 self._last_timings = self._timings.as_dict()
             self._flush_trace()
+            self._finish_log_entry()
             self._status = "listening" if self._running else "stopped"
             if acquired:
                 self._busy.release()
@@ -1043,6 +1121,7 @@ class Orchestrator:
             logger.error("Speech synthesis failed: %s", exc)
             self._last_error = str(exc)
             return False
+        self._turn_speech_cached = bool(getattr(self.tts, "last_from_cache", False))
 
         self._last_spoken_text = text
 
@@ -1162,9 +1241,12 @@ class Orchestrator:
         # either setting used to show in the panel and do nothing until the
         # app was restarted. Rebuilt around the existing contents, keeping the
         # newest — a longer trace is not worth throwing the current one away.
-        history_len = max(1, cfg.get("memory_log", 20))
-        if history_len != self._history.maxlen:
-            self._history = deque(self._history, maxlen=history_len)
+        log_settings = cfg.get("radio_log", {}) or {}
+        self.radio_log.configure(
+            enabled=log_settings.get("enabled", True) is True,
+            keep=log_settings.get("keep", 1000),
+            path=cfg.path.parent / RADIO_LOG_FILE,
+            retention_days=log_settings.get("retention_days", 30))
         trace_len = self._trace_maxlen()
         if trace_len != self._trace_samples.maxlen:
             self._trace_samples = deque(self._trace_samples, maxlen=trace_len)
