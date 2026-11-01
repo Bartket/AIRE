@@ -156,6 +156,11 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
         # mic is live without looking at the screen.
         "ptt_beep": True,
         "ptt_beep_volume": 0.35,
+        # The quickest the engineer answers after you let go of the button.
+        # A cached answer could start almost at once, which sounds like a
+        # recording rather than someone who heard the question. Answers that
+        # already take longer are never held further; 0 turns it off.
+        "min_reply_seconds": 1.5,
     },
     "ducking": {
         "enabled": True,
@@ -191,8 +196,8 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
         # command still needs a separate spoken confirmation when enabled.
         "enabled": False,
         # The driver may waive that confirmation for the "pit stop …" form
-        # only, which is parsed by the strict grammar from their own words.
-        # Commands the model had to interpret are always confirmed.
+        # only, even where the model has to interpret the rest. Commands
+        # without the prefix are always confirmed.
         "confirm_pit_stop_commands": True,
     },
     "desktop": {

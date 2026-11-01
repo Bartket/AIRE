@@ -15,6 +15,21 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   damage, and a car that spun keeps its best, so it called a car that was
   closing “dropping away”.
 
+- **Voice → TTS Model** says which models ramble. Flash v2.5 often finishes
+  the sentence and keeps talking — a repeated phrase, a hum, seconds of
+  silence — and did so on 26 of 35 takes of one pit read-back. Two models
+  stopped cleanly every time: **Eleven v4 Turbo**, newly offered, at Flash's
+  price but with a theatrical pause mid-sentence; and **Multilingual v2**,
+  the plainest delivery, at twice the price. Eleven v3 Conversational (also
+  new, Flash's price) and Eleven v3 stopped cleanly too; v3 takes about a
+  second longer per answer. Flash stays the default; the README has the
+  measurements and prices under *Choosing a speech model*.
+
+- The engineer never answers sooner than 1.5 seconds after you let go of
+  the button — **Audio → Quickest reply**, 0 to switch it off. A cached
+  answer could start almost at once, which sounded like a recording rather
+  than someone who had heard the question. Answers that already take longer
+  are not held any further.
 - The status bar says what is going on in plain words. What the engineer is
   doing — listening, recording, thinking, speaking — is a badge on the left;
   each check on the right is a button that opens the tab that fixes it.
@@ -92,10 +107,14 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
   Until there are three clean laps it says what the gap is doing right now
   instead. “Catch” means the gap closes; whether he then gets by is racing.
   Rival lap recording has not yet run in a live iRacing session.
+- A take you call bad — “that was gibberish”, “say again” — is kept in
+  `speech-cache\rejected\` (the last 20, as WAV with the text sent beside
+  it) instead of being deleted, so a rare garbled word can be traced to a
+  respelling or to the voice model.
 - **Ask me to confirm “pit stop …” commands**, on the Race tab, on by
   default. Off, a command starting with *pit stop* is set as soon as it is
-  spoken and read back as set. Commands in your own words are always
-  confirmed, because the model interpreted them. The panel now shows the
+  spoken and read back as set, even when the model had to interpret the
+  wording. Commands without the *pit stop* prefix are always confirmed. The panel now shows the
   *pit stop* form with examples, alongside the confirm and cancel words.
 - Each exchange in the log shows the session type iRacing reported and what
   the engineer took it for (e.g. `Practice → practice`). An unrecognised or
@@ -122,6 +141,12 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 - A spoken *pit stop* command never reached the strict grammar: the full
   stop and commas speech recognition adds made it unreadable, so every one
   went through the model instead. Typed commands were unaffected.
+- *“Pit stop, add five litres of fuel”* asked for confirmation with
+  confirmation switched off: any *pit stop* command the grammar could not
+  read went to the model, and a command the model read was always
+  confirmed. Switching confirmation off now covers every command that
+  starts with *pit stop*, however it is worded. *“Add 5 litres”* and *“5
+  litres of fuel”* also parse directly now, without a model call.
 - The engineer could read out a note to itself: "Wait, that exceeds my
   limit of one sentence at 25 words? Let me count…". Written as one
   paragraph, it got past the check that keeps only the final draft. Where a

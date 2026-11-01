@@ -850,3 +850,42 @@ def test_the_recognisers_punctuation_does_not_send_pit_stop_to_the_model(
         lambda *_args: (_ for _ in ()).throw(AssertionError("asked the model")))
     result = asyncio.run(orch.ask("Pit stop, fast repair.", speak=False))
     assert result["answer"] == "Pit stop set: fast repair."
+
+
+def test_an_amount_of_fuel_is_read_by_the_grammar_not_the_model(
+        tmp_path, monkeypatch):
+    """"Pit stop, add five liters of fuel" failed the grammar on "of fuel", so
+    the model interpreted it — and an interpreted command is always confirmed,
+    which read as the waived confirmation being ignored."""
+    for spoken in (
+        "Pit stop, add five liters of fuel.",
+        "pit stop add 5 litres",
+        "pit stop five litres of fuel",
+        "pit stop set 5 litres fuel",
+    ):
+        assert parse_pit_command(spoken).commands == \
+            (PitCommand("fuel", 5),), spoken
+    assert parse_pit_command("pit stop four tyres and add 30 litres of fuel") == \
+        parse_pit_command("pit stop four tyres and thirty litres")
+
+    orch = _held(tmp_path, monkeypatch, confirm=False)
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("asked the model")))
+    result = asyncio.run(orch.ask("Pit stop, add five liters of fuel.", speak=False))
+    assert result["answer"] == "Pit stop set: 5 litres of fuel."
+
+
+def test_waiving_confirmation_covers_every_pit_stop_command(tmp_path, monkeypatch):
+    """The waiver is about the prefix the driver chose to say, not about which
+    parser read the rest. A "pit stop" command outside the grammar was still
+    confirmed, so the setting looked ignored for half of what was said."""
+    orch = _held(tmp_path, monkeypatch, confirm=False)
+    monkeypatch.setattr(
+        orch.llm, "interpret_pit_command",
+        lambda *_args: PitCommandInterpretation("command", "pit stop fuel 5 litres"))
+
+    result = asyncio.run(orch.ask("Pit stop, give me five litres.", speak=False))
+
+    assert result["answer"] == "Pit stop set: 5 litres of fuel."
+    assert orch.telemetry.applied == [(PitCommand("fuel", 5),)]

@@ -150,7 +150,7 @@ working while iRacing is fullscreen. Use the tray icon to reopen or quit it.
 | **No sound** | Select the output under Audio, try Preview dry, then check AIRE's volume. |
 | **Push-to-talk does nothing** | Save after changing its type and check that the status-bar binding is green. |
 | **Telemetry stays red** | Start iRacing, enter a session, and use Race → Source → Auto or iRacing. |
-| **Voice stutters or produces nonsense** | Apply Most stable, keep Style at 0, or say “that was gibberish” to regenerate the last line. |
+| **Voice stutters or produces nonsense** | Apply Most stable, keep Style at 0, or say “that was gibberish” to regenerate the last line. If it keeps talking after the sentence, switch Voice → TTS Model to Eleven v4 Turbo or Multilingual v2. |
 | **The window disappeared** | AIRE is still running in the Windows system tray. |
 | **The window is blank** | Install or repair the Microsoft Edge WebView2 Runtime, then restart AIRE. |
 | **Something failed and the panel does not say why** | Read `%APPDATA%\AIRE\aire.log`. AIRE keeps its warnings and errors there. |
@@ -311,9 +311,9 @@ Speak to it as you would a human engineer; the wording is not a command list:
 Or start with **pit stop** and it is read straight from your words by a
 strict grammar, with no model involved:
 
-> Pit stop four tyres and 30 litres · Pit stop wet tyres · Pit stop fuel 8
-> gallons · Pit stop four tyres at 21 PSI · Pit stop fast repair · Pit stop
-> clear all
+> Pit stop four tyres and 30 litres · Pit stop add 5 litres of fuel · Pit
+> stop wet tyres · Pit stop fuel 8 gallons · Pit stop four tyres at 21 PSI ·
+> Pit stop fast repair · Pit stop clear all
 
 Questions remain questions: *“Should I take wets?”* or *“How much fuel do I
 need?”* cannot arm a command. For an instruction, the LLM produces a restricted
@@ -332,8 +332,9 @@ and ordinary answers never set the pit stop.
 **Ask me to confirm “pit stop …” commands** (on by default) can be switched off
 on the Race tab. A command that starts with *pit stop* is then set as soon as
 you say it, and read back as set — so a misheard one cannot be cancelled
-first. Commands in your own words are always confirmed, because the model
-interpreted them.
+first. That includes a *pit stop* command worded outside the grammar above,
+which the model interprets and which is then set without asking. Commands
+without the *pit stop* prefix are always confirmed.
 
 “Enable refuelling” or “turn refuelling back on” rechecks fuel service at the
 amount already selected. It does not mean fill the tank or calculate a new
@@ -604,6 +605,57 @@ was gibberish”**, **“your voice glitched”**, or **“say again”** and AI
 regenerates the last spoken line without asking the language model again. The
 replacement also evicts that phrase's bad cached audio.
 
+The bad take is not thrown away: the last 20 are kept in
+`speech-cache\rejected\` as WAV files, each with a `.json` beside it holding
+the exact text sent. Listen to a few. If the same kind of word garbles every
+time — a name, a car class — a respelling in the pronunciation table fixes it
+for free; if the voice keeps talking after the sentence, it is the model —
+see [Choosing a speech model](#choosing-a-speech-model).
+
+### Choosing a speech model
+
+**Voice → TTS Model** picks the ElevenLabs model that speaks every answer.
+Flash v2.5 is the shipped default because it is cheap and fast, but it has a
+failure the others do not: it says the sentence correctly and then **keeps
+going** — a pause, a repeated phrase, a hum, or seconds of silence ending in
+a noise. That is the "gibberish after the answer" some drivers hear, and
+saying "that was gibberish" usually just draws another bad take.
+
+Measured on one real read-back, *"Pit stop set: clear all service."*, with
+the same voice and settings on each model:
+
+| Model | Kept talking past the sentence | Request time | API price per 1K characters |
+| --- | --- | --- | --- |
+| Flash v2.5 | 26 of 35 takes | ~0.23 s | $0.04 |
+| **Eleven v4 Turbo** | **0 of 10** | ~0.42 s | **$0.04** |
+| Eleven v3 Conversational | 0 of 10 | ~0.48 s | $0.04 |
+| **Multilingual v2** | **0 of 15** | ~0.31 s | $0.08 |
+| Eleven v3 | 0 of 10 | ~1.3 s | $0.08 |
+
+Prices are the [ElevenLabs API list prices](https://elevenlabs.io/pricing/api),
+the same on every plan; your plan's included characters come off first.
+
+Two models are worth choosing between, by ear:
+
+- **Eleven v4 Turbo** — stops cleanly at Flash's price. It reads lines more
+  theatrically: on the line above it paused about three quarters of a second
+  after "set:", which makes the answer longer to listen to.
+- **Multilingual v2** — the fastest of the clean models and the plainest
+  delivery, which suits radio, at twice the price per character.
+
+Eleven v3 Conversational also stops cleanly at Flash's price, with a shorter
+version of the same pause. Eleven v3 adds about a second to every new answer.
+v3 Conversational and v4 Turbo were measured with speed 1.0, the others with
+0.95.
+
+Caveats: this is one sentence, measured from one connection at one time. Other
+lines may fail Flash less often, and request times depend on your network. Speed
+1.0 instead of 0.95 helped Flash (4 of 10 ran on) but did not fix it; the
+pauses were measured on a line with a colon in it and may be shorter elsewhere;
+changing
+the punctuation did nothing. Switching models re-synthesizes each phrase once;
+the old cached takes age out on their own.
+
 **Star a voice** with the ☆ on its card to keep it at the top of the list. A
 library runs to dozens of entries and the good ones are found by ear, one
 preview at a time; favourites survive a settings reset for that reason.
@@ -667,6 +719,15 @@ for the shipped one.
 so you can balance the engineer against sim and other audio apps without
 touching the Windows mixer. It applies to the radio preview too, so what you
 audition is what you get.
+
+### Quickest reply
+
+**Audio → Quickest reply** (1.5 s by default) is the soonest the engineer
+starts talking after you release push-to-talk. A cached answer can otherwise
+start almost at once, which sounds like a recording rather than someone who
+heard the question. It is a floor, not an extra wait: an answer that already
+took longer is not held, and 0 turns it off. A typed question counts from when
+you send it.
 
 ### Radio effect
 
@@ -794,7 +855,9 @@ thirds on Haiku 5.5. If that matters:
   — see below
 - Point `llm.provider` at a local server and the LLM cost goes to zero
 - Lower `elevenlabs.tts_model` to a Flash model, or shorten answers, to cut
-  the largest line item
+  the largest line item — Flash often keeps talking after the sentence, and
+  Eleven v4 Turbo costs the same without doing so; see
+  [Choosing a speech model](#choosing-a-speech-model)
 - Prompt caching is not worth it on Haiku 5.5: the most it could save is
   about $0.0003 a question
 

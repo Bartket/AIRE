@@ -179,9 +179,10 @@
                            v-model="config.pit_commands.confirm_pit_stop_commands" />
                     <label for="pit-confirm">Ask me to confirm “pit stop …” commands</label>
                     <p class="hint hint-keep">
-                        Off: a command starting with <strong>pit stop</strong> is set at once and
-                        read back as set, with no chance to cancel a misheard one. Commands in
-                        your own words are always confirmed, because the model interpreted them.
+                        Off: any command starting with <strong>pit stop</strong> is set at once and
+                        read back as set, with no chance to cancel a misheard one — even when the
+                        model had to interpret the wording. Commands without <em>pit stop</em> are
+                        always confirmed.
                     </p>
                 </div>
 </section>
@@ -435,11 +436,14 @@
                 <div class="form-group">
                     <label>TTS Model:</label>
                     <select v-model="config.elevenlabs.tts_model">
-                        <option value="eleven_flash_v2_5">Flash v2.5 (lowest latency)</option>
-                        <option value="eleven_multilingual_v2">Multilingual v2 (twice the price)</option>
-                        <option value="eleven_v3">Eleven v3 (twice the price)</option>
+                        <option value="eleven_v4_turbo">Eleven v4 Turbo</option>
+                        <option value="eleven_v3_conversational">Eleven v3 Conversational</option>
+                        <option value="eleven_v3">Eleven v3</option>
+                        <option value="eleven_multilingual_v2">Multilingual v2</option>
+                        <option value="eleven_flash_v2_5">Flash v2.5</option>
                     </select>
-                    <p class="hint hint-keep">The engineer's voice. Flash is the fastest and the cheapest per character, which is what matters while you are waiting mid-corner. The other two cost twice as much per character and are slower on this path; Multilingual reads numbers slightly better.</p>
+                    <p class="hint">Flash can ramble after the answer; v4 Turbo stops cleanly at the same price, Multilingual v2 is plainer but costs double.
+                        <a :href="docs('choosing-a-speech-model')" target="_blank" rel="noopener">More</a>.</p>
                 </div>
             </section>
 
@@ -706,6 +710,18 @@
                     <p class="hint">
                         Above 100% a soft limiter adds loudness without clipping.
                         <a :href="docs('engineer-voice-volume')" target="_blank" rel="noopener">More</a>.
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label>Quickest reply:</label>
+                    <div class="range-row">
+                        <input type="range" v-model.number="config.audio.min_reply_seconds"
+                               min="0" max="5" step="0.25" />
+                        <span class="range-value">{{ config.audio.min_reply_seconds }} s</span>
+                    </div>
+                    <p class="hint">
+                        Soonest the engineer speaks after you release push-to-talk; 0 is off.
+                        <a :href="docs('quickest-reply')" target="_blank" rel="noopener">More</a>.
                     </p>
                 </div>
             </section>

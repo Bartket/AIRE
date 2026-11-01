@@ -1,12 +1,14 @@
 """The final speech boundary must be safer than the text shown in the log."""
 
 import asyncio
+import json
+import wave
 
 from ai_race_engineer import pronounce
 from ai_race_engineer.config import AppConfig
 from ai_race_engineer.orchestrator import Orchestrator
 from ai_race_engineer.tts import TTS
-from ai_race_engineer.tts_cache import TTSCache
+from ai_race_engineer.tts_cache import MAX_REJECTED, TTSCache
 
 
 class _SpeechResponse:
@@ -97,6 +99,37 @@ def test_regeneration_replaces_only_the_requested_cached_phrase(tmp_path):
 
     assert client.synthesize("Fuel margin 2.1 litres.") == other
     assert len(sent) == 3, "regenerating one reply evicted another cached phrase"
+
+
+def test_a_regenerated_take_is_kept_for_review_not_deleted(tmp_path):
+    client = TTS("key", cache=TTSCache(tmp_path))
+    takes = iter([_pcm(1), _pcm(2)])
+    client._client.post = lambda *a, **k: _SpeechResponse(next(takes))
+
+    client.synthesize("You're P4.")
+    client.synthesize("You're P4.", regenerate=True)
+
+    kept = list((tmp_path / "rejected").glob("*.wav"))
+    assert len(kept) == 1, "the garbled take was deleted, so nobody can listen to it"
+    with wave.open(str(kept[0]), "rb") as wf:
+        assert wf.getframerate() == client.sample_rate
+        assert wf.readframes(wf.getnframes()) == _pcm(1)
+    meta = json.loads(kept[0].with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["text"] == pronounce.for_speech("You're P4.")
+    assert meta["model"] == "eleven_flash_v2_5"
+
+
+def test_only_the_newest_rejected_takes_are_kept(tmp_path):
+    cache = TTSCache(tmp_path)
+    for i in range(MAX_REJECTED + 5):
+        cache.put(f"k{i:02d}", _pcm())
+        cache.reject(f"k{i:02d}", {"text": str(i)})
+
+    kept = sorted((tmp_path / "rejected").glob("*.wav"))
+    assert len(kept) == MAX_REJECTED
+    assert len(list((tmp_path / "rejected").glob("*.json"))) == MAX_REJECTED
+    assert kept[-1].name.endswith(f"k{MAX_REJECTED + 4:02d}.wav")
+    assert cache.stats()["entries"] == 0, "rejected takes counted as cached speech"
 
 
 def test_natural_repeat_phrases_are_recognised_as_radio_controls():

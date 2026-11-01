@@ -151,7 +151,15 @@ class TTS:
             key = cache_key(
                 text, self._voice_id, self._model, settings, request_options)
             if regenerate:
-                self._cache.delete(key)
+                kept = self._cache.reject(key, {
+                    "text": text,
+                    "voice_id": self._voice_id,
+                    "model": self._model,
+                    "voice_settings": settings,
+                    "request": request_options,
+                })
+                if kept is not None:
+                    logger.info("Kept the rejected take for review: %s", kept)
             else:
                 cached = self._cache.get(key)
                 if cached is not None:

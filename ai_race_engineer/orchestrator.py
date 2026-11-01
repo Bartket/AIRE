@@ -115,6 +115,10 @@ class _Timings:
             spent = (time.perf_counter() - began) * 1000.0
             self._stages[name] = round(self._stages.get(name, 0.0) + spent, 1)
 
+    def elapsed(self) -> float:
+        """Seconds since the top of the turn."""
+        return time.perf_counter() - self._started
+
     def mark_first_audio(self) -> None:
         """When the first sample reaches the speakers, from the top of the turn.
 
@@ -266,6 +270,14 @@ class Orchestrator:
             return max(0.02, float(self.config.telemetry.get("poll_interval", 0.1)))
         except (TypeError, ValueError):
             return 0.1
+
+    def _min_reply_seconds(self) -> float:
+        """The quickest a reply may start after the driver stops talking."""
+        try:
+            return min(10.0, max(0.0, float(
+                self.config.audio.get("min_reply_seconds", 1.5))))
+        except (TypeError, ValueError):
+            return 1.5
 
     def _trace_maxlen(self) -> int:
         """Samples needed to cover `_TRACE_SECONDS` at the current poll rate."""
@@ -955,7 +967,6 @@ class Orchestrator:
         compounds = self.telemetry.pit_tire_compounds()
         command_text = question
         plan = None
-        interpreted = False
         if explicit:
             try:
                 plan = parse_pit_command(command_text, compounds)
@@ -964,7 +975,6 @@ class Orchestrator:
                 # ordinary human phrasing rather than the canonical grammar.
                 pass
         if plan is None:
-            interpreted = True
             with self._timings.stage("pit_classifier"):
                 interpretation = await asyncio.to_thread(
                     self.llm.interpret_pit_command,
@@ -1000,13 +1010,13 @@ class Orchestrator:
             return f"I couldn't arm that command: {reason}.", "pit_command:not_ready"
 
         # The driver may waive the confirmation, and only for the "pit stop …"
-        # form: there the plan is the strict grammar applied to their own
-        # words. Anything the model interpreted keeps the second turn, because
-        # a misreading is a risk the driver never chose. Fail-safe: anything
+        # form: saying the prefix is the deliberate choice. That holds even
+        # when the model had to read the rest — the amount checks above still
+        # apply. Without the prefix the second turn stays. Fail-safe: anything
         # but an explicit False still confirms.
         confirm = self.config.get("pit_commands", {}).get(
             "confirm_pit_stop_commands", True) is not False
-        if not interpreted and not confirm:
+        if explicit and not confirm:
             applied, reason = await asyncio.to_thread(
                 self.telemetry.apply_pit_commands, plan.commands)
             if not applied:
@@ -1040,6 +1050,12 @@ class Orchestrator:
             audio = pcm_to_float(pcm)
             audio = self._apply_radio_effect(audio, self.tts.sample_rate)
             audio = apply_volume(audio, self.config.audio.get("volume", 1.0))
+
+        # Before ducking, so other apps are not muted through the pause.
+        pause = self._min_reply_seconds() - timings.elapsed()
+        if pause > 0:
+            with timings.stage("pause"):
+                await asyncio.sleep(pause)
 
         # Off the loop like everything either side of it: duck() enumerates
         # every WASAPI session and queries an interface per match, and doing

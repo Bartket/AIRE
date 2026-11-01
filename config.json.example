@@ -62,7 +62,8 @@
     "max_record_seconds": 30.0,
     "volume": 1.0,
     "ptt_beep": true,
-    "ptt_beep_volume": 0.35
+    "ptt_beep_volume": 0.35,
+    "min_reply_seconds": 1.5
   },
   "ducking": {
     "enabled": true,

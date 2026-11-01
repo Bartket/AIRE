@@ -375,9 +375,13 @@ def parse_pit_command(
             commands.append(PitCommand("fuel", litres))
             summaries.append(f"{litres} litre{'s' if litres != 1 else ''} of fuel")
             continue
-        # "Four tyres and thirty litres" is the natural short radio form.
-        if re.fullmatch(r".+\s+(?:litres?|liters?|l|gallons?|gal)", piece):
-            litres = _amount(piece, "fuel")
+        # "Four tyres and thirty litres" is the natural short radio form, and
+        # "add five litres of fuel" the natural long one.
+        amount = re.fullmatch(
+            r"(?:(?:add|set)\s+)?(.+\s+(?:litres?|liters?|l|gallons?|gal))"
+            r"(?:\s+(?:of\s+)?fuel)?", piece)
+        if amount:
+            litres = _amount(amount.group(1), "fuel")
             commands.append(PitCommand("fuel", litres))
             summaries.append(f"{litres} litre{'s' if litres != 1 else ''} of fuel")
             continue

@@ -65,3 +65,43 @@ def test_the_readmes_first_question_gets_an_answer_offline():
     assert answer, "the fuel question did not reach its calculator"
     assert "no fuel reading" not in answer.lower()
     assert "three green laps" not in answer.lower()
+
+
+def test_a_quick_answer_waits_like_an_engineer_and_a_slow_one_does_not(
+        tmp_path):
+    """A cached, deterministic answer started playing within moments of the
+    driver letting go of the button — too fast to sound like anyone heard the
+    question. The floor is measured from release, so it never adds to an
+    answer that was already slow."""
+    import asyncio
+
+    from ai_race_engineer import orchestrator as module
+    from ai_race_engineer.config import AppConfig
+
+    config = AppConfig(
+        {"telemetry": {"source": "simulated"}, "ducking": {"enabled": False},
+         "audio": {"min_reply_seconds": 0.2}},
+        path=tmp_path / "config.json")
+    orch = module.Orchestrator(config)
+    orch.tts.synthesize = lambda text, regenerate=False: b"\x01\x02" * 1000
+    orch.audio_player.play_array = lambda audio, rate: None
+    orch._apply_radio_effect = lambda audio, rate: audio
+
+    orch._timings = module._Timings()
+    asyncio.run(orch._speak("P3."))
+    quick = orch._timings.as_dict()
+    assert quick["first_audio"] >= 200, quick
+
+    orch._timings = module._Timings()
+    orch._timings._started -= 1.0  # the model already took a second
+    asyncio.run(orch._speak("P3."))
+    assert "pause" not in orch._timings.as_dict()
+
+    # A setting, read when speaking: 0 is off, and a hand-edited nonsense
+    # value falls back to the default rather than costing the answer.
+    config.audio["min_reply_seconds"] = 0
+    orch._timings = module._Timings()
+    asyncio.run(orch._speak("P3."))
+    assert "pause" not in orch._timings.as_dict()
+    config.audio["min_reply_seconds"] = "soon"
+    assert orch._min_reply_seconds() == 1.5

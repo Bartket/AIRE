@@ -21,6 +21,8 @@ import hashlib
 import json
 import logging
 import threading
+import time
+import wave
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -29,6 +31,9 @@ logger = logging.getLogger("race-engineer")
 #: Raw PCM is 48 KB per second at 24 kHz mono, so a five-second answer is
 #: about 240 KB. The default holds several hundred phrases.
 DEFAULT_MAX_MB = 128
+
+#: Takes the driver called bad ("that was gibberish"), kept for listening.
+MAX_REJECTED = 20
 
 
 def cache_key(
@@ -173,6 +178,46 @@ class TTSCache:
             return True
         except OSError:
             return False
+
+    def reject(self, key: str, meta: Dict[str, Any]) -> Optional[Path]:
+        """Move a take the driver called bad aside instead of deleting it.
+
+        Garbles are rare and nothing else records which words they hit, so
+        the take and the exact text sent are the only evidence of whether a
+        respelling would fix it or the model is at fault. Kept as WAV so it
+        plays straight from Explorer; only the newest few are kept.
+        Returns the WAV path, or None if there was nothing to keep.
+        """
+        if not self._enabled:
+            return None
+        path = self._dir / f"{key}.pcm"
+        try:
+            pcm = path.read_bytes()
+            rejected = self._dir / "rejected"
+            rejected.mkdir(exist_ok=True)
+            stem = f"{time.strftime('%Y%m%d-%H%M%S')}-{key}"
+            wav = rejected / f"{stem}.wav"
+            with wave.open(str(wav), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(pcm)
+            (rejected / f"{stem}.json").write_text(
+                json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
+            path.unlink()
+        except OSError as exc:
+            if not isinstance(exc, FileNotFoundError):
+                logger.debug("Could not keep the rejected take: %s", exc)
+            self.delete(key)
+            return None
+        # Name order is time order; drop the oldest beyond the cap.
+        for old in sorted(rejected.glob("*.wav"))[:-MAX_REJECTED]:
+            for f in (old, old.with_suffix(".json")):
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return wav
 
     def stats(self) -> Dict[str, Any]:
         """Hit rate and size, for the settings panel."""
