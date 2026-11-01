@@ -235,7 +235,7 @@ diagnostic trace in a public issue.
 | Area | Reads |
 | --- | --- |
 | **Position** | Live on-track order (not just the last start/finish crossing), class position, full running order with gaps |
-| **Rivals** | Names, car numbers, gaps in seconds and metres, laps down, who is in the pits |
+| **Rivals** | Names, car numbers, timing gaps in seconds, the distance in metres when it is to that car, laps down, who is in the pits |
 | **Pace** | Lap times as `m:ss.mmm`, best, last, rolling average, delta to your best and to the session best, and the trend across recent clean laps |
 | **Fuel** | Volume on board, measured burn per clean lap, range, and whether it reaches the end — in litres, kilograms or gallons to match your dash |
 | **Tyres** | Tread and carcass temperature across three strips per tyre, wear, age |
@@ -984,6 +984,23 @@ run `uv lock` and regenerate the pip fallback:
 uv export --no-dev --no-hashes --no-emit-project --no-annotate -o requirements.txt
 ```
 
+### Replaying recorded sessions
+
+iRacing saves telemetry for every stint you run as a `.ibt` file in
+`Documents\iRacing\telemetry`. `tools/ibt_replay.py` feeds one through the
+real telemetry reader at the app's poll rate and checks lap times, fuel burn
+and sector bests against the 60 Hz recording:
+
+```bash
+python tools/ibt_replay.py "C:/Users/you/Documents/iRacing/telemetry/*.ibt"
+```
+
+It needs pyirsdk, so run it on Windows (or pass `--irsdk-path` to a Windows
+venv's `site-packages` from WSL). A `.ibt` has only your own car's channels —
+nothing about the other cars — so gaps, rivals and running order are not
+covered. `--extract` writes a slice of channel values (no names) as a test
+fixture; `tests/fixtures/ibt/` holds the ones the tests replay.
+
 ### Building the Windows executable
 
 ```powershell
@@ -1236,6 +1253,7 @@ ai_race_engineer/
     ├── irsdk_reader.py  # iRacing
     └── simulated.py     # synthetic telemetry
 tools/make_icon.py       # regenerates icon.ico
+tools/ibt_replay.py      # replays recorded iRacing sessions through the reader
 run_desktop.py           # frozen entry point
 AIRE.spec                # PyInstaller build definition
 build_windows.ps1        # one-shot Windows build

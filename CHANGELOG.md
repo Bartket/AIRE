@@ -191,6 +191,41 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Fixed
 
+Found by replaying 53 recorded iRacing sessions (`.ibt` files) through the
+telemetry reader and comparing with the 60 Hz recording. `tools/ibt_replay.py`
+does that replay.
+
+- **Every lap was logged with the lap before's time.** iRacing updates the
+  last lap time up to 2.1 s after the lap count, and the reader read it on
+  the count: 173 of 178 recorded laps were wrong. Pace trends, the race
+  story, the catch projection and the lap count in timed races all ran on
+  it. A lap waits for its own time now; a lap iRacing does not time stays in
+  the history without one.
+- **Best sectors of a hundredth of a second.** Creeping back a few
+  millimetres with the car stopped was read as two laps, which set best
+  sectors of 0.01 to 0.04 s in 44 of 52 sessions. Only a real crossing of
+  the line ends a lap now.
+- **Fuel to the finish could be a lap short.** iRacing's laps remaining
+  counts down when the *leader* crosses the line. For any car not leading it
+  was read against the driver's own lap, so between the leader's crossing
+  and theirs — most of the lap for a car well back — the engineer planned a
+  lap too few. Timed races now end on the leader's crossing too, and after
+  the leader's flag the driver still has the rest of their lap.
+- **The gap to the car ahead or behind is the timing gap.** It was the
+  distance divided by your own speed at that moment, which doubled through
+  a hairpin and swung 3.0 to 6.2 s within one lap at Bathurst. The distance
+  in metres is only given when it is to that car, not to a lapped car on the
+  road between you.
+- A lap behind the safety car, or the formation lap, is no longer averaged
+  into the fuel burn. The fuel answer already said it was excluded.
+- The run from the grid to the line is no longer filed as lap 1's fuel.
+- Test sessions no longer report "one lap to green" as the flag the whole
+  time.
+- The stint projection plans on the same burn as the fuel call, so the two
+  can no longer disagree about whether you make it.
+- A stop whose in-lap and out-lap straddle the line counts as one stop.
+- Rain is reported as a percentage, and track wetness uses iRacing's own
+  names for its levels.
 - Confirming a pit command with anything but the bare word — *“Yes,
   confirm”*, *“Confirmed”*, *“Copy, confirm”* — threw the command away and
   passed the words to the model, which could answer *“Confirmed, car's all

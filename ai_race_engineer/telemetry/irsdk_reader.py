@@ -14,7 +14,7 @@ import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
-from . import (OFF_THE_MEDIAN, CarTelemetry, LapRecord, Rival,
+from . import (NO_LAP_TIME, OFF_THE_MEDIAN, CarTelemetry, LapRecord, Rival,
                TelemetryAdapter, TelemetrySnapshot, TrackConfig, TyreState,
                session_kind)
 from ..pit_commands import PitCommand, PitTireCompound
@@ -23,6 +23,10 @@ logger = logging.getLogger("race-engineer")
 
 # How long to wait before retrying irsdk.startup() while iRacing is closed.
 _STARTUP_RETRY_SECONDS = 2.0
+
+# How long a completed lap waits for LapLastLapTime to change. The longest
+# lag in 53 recorded sessions was 2.1 s of session time.
+_LAP_TIME_SETTLE_SECONDS = 3.0
 
 try:
     import irsdk
@@ -60,11 +64,14 @@ _FLAG_BITS: List[Tuple[int, str]] = [
     (0x00000004, "Green"),
 ]
 
-# iRacing TrackWetness enum. Absent on older builds — _get() returns None and
-# the field simply never reaches the prompt.
+# iRacing TrackWetness enum, as pyirsdk names it. Absent on older builds —
+# _get() returns None and the field simply never reaches the prompt. Read
+# through _enum_map(); this is only the fallback for when pyirsdk is not
+# there to ask. The table it replaces was written from memory and named
+# three of the eight levels differently from the SDK.
 _TRACK_WETNESS = {
-    0: "unknown", 1: "dry", 2: "mostly dry", 3: "damp",
-    4: "slightly wet", 5: "wet", 6: "very wet", 7: "extremely wet",
+    0: "unknown", 1: "dry", 2: "mostly dry", 3: "very lightly wet",
+    4: "lightly wet", 5: "moderately wet", 6: "very wet", 7: "extremely wet",
 }
 
 def _enum_map(cls_name: str, fallback: Dict[int, str]) -> Dict[int, str]:
@@ -284,13 +291,22 @@ def _decode_penalty(value: Optional[int]) -> Optional[str]:
     return None
 
 
-def _decode_flag(value: Optional[int]) -> str:
-    """Map the iRacing SessionFlags bitfield to a single readable label."""
+def _decode_flag(value: Optional[int], kind: str = "race") -> str:
+    """Map the iRacing SessionFlags bitfield to a single readable label.
+
+    `kind` is session_kind(). The start-sequence bits only mean something
+    where there is a start: every recorded Offline Testing session carries
+    one-lap-to-green on every sample, and decoded as the flag that told the
+    driver a green was coming for the whole session.
+    """
     try:
         bits = int(value or 0)
     except (TypeError, ValueError):
         return "Green"
     bits &= ~_NON_FLAG_BITS
+    if kind == "practice":
+        bits &= ~(_flag_value("one_lap_to_green", 0x00000200)
+                  | _flag_value("green_held", 0x00000400))
     if not bits:
         return "Green"
     for bit, label in _flag_bits():
@@ -558,6 +574,10 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # progress can be trusted as a clean reference.
         self._laps: Deque[LapRecord] = deque(maxlen=120)
         self._lap_marker: Optional[int] = None
+        # The lap just completed, held until LapLastLapTime catches up with
+        # it; see _update_laps().
+        self._pending_lap: Optional[Dict[str, Any]] = None
+        self._last_lap_time_seen: Any = None
         # Which session segment we were in at the last poll. LapCompleted is
         # "Laps completed count" with no session qualifier — which is why
         # RaceLaps exists separately — so it is not known whether it keeps
@@ -570,6 +590,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # results do not supply it. See _grid_position().
         self._grid_latched: Optional[int] = None
         self._grid_latched_class: Optional[int] = None
+        # LapCompleted when the leader took the flag; see _past_the_flag().
+        self._checkered_lap: Optional[int] = None
         self._lap_dirty: bool = False
         self._lap_dirty_reason: str = ""
         self._lap_caution: bool = False
@@ -579,6 +601,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._rival_lap_state: Dict[int, Dict[str, Any]] = {}
         # Verdict on the lap most recently completed, read by the fuel average.
         self._last_lap_clean: bool = True
+        # Whether that lap ran behind a caution or the pace car. Kept apart
+        # from `clean` (see LapRecord.caution); the fuel average reads both.
+        self._last_lap_caution: bool = False
         # iRacing restricts live tyre telemetry to in-car dashboards: for
         # third-party readers the values only refresh in the pits, so a race
         # spent on track reports whatever they were at the last stop. Rather
@@ -1004,16 +1029,19 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._session_generation = getattr(self, "_session_generation", 0) + 1
         self._laps.clear()
         self._lap_marker = None
+        self._pending_lap = None
         self._session_num = None
         self._segment_restarted = False
         self._grid_latched = None
         self._grid_latched_class = None
+        self._checkered_lap = None
         self._lap_dirty = False
         self._lap_dirty_reason = ""
         self._lap_caution = False
         getattr(self, "_rival_laps", {}).clear()
         getattr(self, "_rival_lap_state", {}).clear()
         self._last_lap_clean = True
+        self._last_lap_caution = False
         self._fuel_marker = None
         self._fuel_minimum = None
         self._fuel_marker_is_partial = True
@@ -1302,9 +1330,12 @@ class iRacingTelemetryReader(TelemetryAdapter):
 
             track_surface_temp=float(self._get("TrackTempCrew", 0.0) or 0.0),
             air_temp=float(self._get("AirTemp", 0.0) or 0.0),
-            rain_intensity=float(self._get("Precipitation", 0.0) or 0.0),
+            # Unit "%", published as a 0-1 fraction like every other "%"
+            # channel read here (humidity, fuel, tread); as a percentage.
+            rain_intensity=float(self._get("Precipitation", 0.0) or 0.0) * 100.0,
 
-            flag=_decode_flag(self._get("SessionFlags", 0)),
+            flag=_decode_flag(self._get("SessionFlags", 0),
+                              session_kind(track.session_type)),
             penalty=_decode_penalty(self._get("SessionFlags", 0)),
             # Integer index only — iRacing publishes no compound
             # names anywhere, so this can say whether two cars are
@@ -1347,12 +1378,14 @@ class iRacingTelemetryReader(TelemetryAdapter):
             fuel_pressure=_positive(self._get("FuelPress")),
             voltage=_positive(self._get("Voltage")),
 
-            track_wetness=_TRACK_WETNESS.get(self._get("TrackWetness")),
+            track_wetness=_enum_map("TrackWetness", _TRACK_WETNESS).get(
+                self._get("TrackWetness")),
             warnings=_decode_warnings(self._get("EngineWarnings")),
             track_surface=self._track_surface(),
             pit_service_status=_enum_map("PitSvStatus", {0: "none"}).get(
                 self._get("PlayerCarPitSvStatus")),
             avg_lap_time=_positive(self._get("LapLastNLapTime")),
+            pace_lap=self._representative_lap(),
             # m/s -> km/h; the rest are read as published.
             wind_speed=(lambda v: v * 3.6 if v is not None else None)(
                 _positive(self._get("WindVel"))),
@@ -1892,7 +1925,16 @@ class iRacingTelemetryReader(TelemetryAdapter):
             if now <= prev_t:                 # session time went backwards
                 continue
 
-            if pct < prev_pct:
+            if pct < prev_pct and not (prev_pct > 0.9 and pct < 0.1):
+                # Backwards without reaching the line. LapDistPct creeps back
+                # by millionths with the car stopped on track; read as a
+                # crossing, two of those a tenth apart swept every boundary
+                # in one poll and set best sectors of hundredths of a second
+                # in 44 of 52 recorded sessions. A spin or reversing does the
+                # same at scale. The lap in progress cannot be timed.
+                self._sector_marks.pop(idx, None)
+                self._sector_dirty[idx] = True
+            elif pct < prev_pct:
                 # Crossed the start/finish line between the two samples.
                 # Interpolate across the wrap by treating this sample as
                 # sitting past 1.0, so the line time is as accurate as any
@@ -1986,6 +2028,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
             if self._session_num is not None:
                 logger.info("Session segment %s -> %s — re-baselining the lap marker",
                             self._session_num, session_num)
+                # A lap still waiting for its time cannot be paired with the
+                # next segment's LapLastLapTime.
+                self._flush_pending_lap()
                 self._lap_marker = None
                 # The fuel marker is baselined against LapCompleted too, and
                 # cannot detect this itself — this runs first and has already
@@ -2000,35 +2045,90 @@ class iRacingTelemetryReader(TelemetryAdapter):
             self._lap_dirty, self._lap_dirty_reason = True, "off track"
         if _positive(self._get("PlayerCarTowTime")):
             self._lap_dirty, self._lap_dirty_reason = True, "towed"
-        if _caution_out(self._get("SessionFlags")):
+        # A formation lap is run at pace-car speed just as a caution lap is,
+        # and says as little about fuel burn or pace.
+        if _caution_out(self._get("SessionFlags")) or _SESSION_STATES.get(
+                self._get("SessionState"), "") == "ParadeLaps":
             self._lap_caution = True
+
+        # What LapLastLapTime read on the poll before this one. A lap's time
+        # is "stale" only if it is still that value: at 10 Hz the first poll
+        # after the line can already carry the new time, when it lagged by
+        # fewer ticks than the poll interval.
+        before = getattr(self, "_last_lap_time_seen", None)
+        self._last_lap_time_seen = self._get("LapLastLapTime")
 
         if self._lap_marker is None:
             self._lap_marker = completed
             return
-        if completed <= self._lap_marker:
-            return
+        if completed > self._lap_marker:
+            # A lap was just completed. Its verdict, position and fuel are
+            # known now; its time is not. LapLastLapTime settles after
+            # LapCompleted moves — 2 to 126 ticks later across 53 recorded
+            # sessions, never on the same tick — so reading it here recorded
+            # every lap with the time of the lap before.
+            self._flush_pending_lap()
+            self._lap_marker = completed
+            dirty, reason = self._lap_dirty, self._lap_dirty_reason
+            self._pending_lap = {
+                "lap": completed,
+                "stale": before,
+                "since": self._lap_clock(),
+                "position": _position(self._get("PlayerCarPosition")),
+                "fuel_left": _positive(self._get("FuelLevel")),
+                "fuel_used": None,
+                "clean": not dirty,
+                "note": reason,
+                "session_num": session_num,
+                "caution": getattr(self, "_lap_caution", False),
+            }
+            self._lap_dirty, self._lap_dirty_reason = False, ""
+            self._lap_caution = False
+            self._last_lap_clean = not dirty
+            self._last_lap_caution = self._pending_lap["caution"]
 
-        # A lap was just completed. LapLastLapTime is the one that finished.
-        self._lap_marker = completed
-        lap_time = _positive(self._get("LapLastLapTime"))
-        dirty, reason = self._lap_dirty, self._lap_dirty_reason
-        caution = getattr(self, "_lap_caution", False)
-        self._lap_dirty, self._lap_dirty_reason = False, ""
-        self._lap_caution = False
-        self._last_lap_clean = not dirty
+        pending = getattr(self, "_pending_lap", None)
+        if pending is None:
+            return
+        now = self._lap_clock()
+        if self._get("LapLastLapTime") != pending["stale"]:
+            self._flush_pending_lap(_positive(self._get("LapLastLapTime")))
+        elif now < pending["since"] or now - pending["since"] > _LAP_TIME_SETTLE_SECONDS:
+            # Never moved: a second lap iRacing did not time (-1 again), or a
+            # time identical to the last. Neither can be told apart from a
+            # stale reading, so the lap is kept without one.
+            self._flush_pending_lap()
+
+    def _lap_clock(self) -> float:
+        """Session time, which is what LapLastLapTime's lag is measured in;
+        the wall clock where SessionTime is not published."""
+        now = _non_negative(self._get("SessionTime"))
+        return time.monotonic() if now is None else now
+
+    def _flush_pending_lap(self, lap_time: Optional[float] = None) -> None:
+        """Record the lap awaiting its time, with `lap_time` or without one.
+
+        A lap with no valid time is still recorded — it is where a pit stop
+        or an off happened, and race_history reports those — but with time
+        0.0 and never as clean, so nothing averages or ranks it.
+        """
+        pending = getattr(self, "_pending_lap", None)
+        if pending is None:
+            return
+        self._pending_lap = None
+        clean, note = pending["clean"], pending["note"]
         if lap_time is None:
-            return
-
+            clean, note = False, note or NO_LAP_TIME
         self._laps.append(LapRecord(
-            lap=completed,
-            time=round(lap_time, 3),
-            position=_position(self._get("PlayerCarPosition")),
-            fuel_left=_positive(self._get("FuelLevel")),
-            clean=not dirty,
-            note=reason,
-            session_num=session_num,
-            caution=caution,
+            lap=pending["lap"],
+            time=round(lap_time, 3) if lap_time is not None else 0.0,
+            position=pending["position"],
+            fuel_left=pending["fuel_left"],
+            fuel_used=pending["fuel_used"],
+            clean=clean,
+            note=note,
+            session_num=pending["session_num"],
+            caution=pending["caution"],
         ))
 
     def _lap_history(self) -> List[LapRecord]:
@@ -2188,7 +2288,16 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._fuel_minimum = minimum
 
         laps = completed - last_completed
-        if laps <= 0:
+        if laps < 0:
+            # The count went backwards: the car was put on the grid (0 to -1
+            # in every recorded race) or reset. Left in place, the marker
+            # measured the run from the grid, or a restore of the count, as a
+            # lap. Wherever the car is now is mid-lap.
+            self._fuel_marker = (completed, level)
+            self._fuel_minimum = level
+            self._fuel_marker_is_partial = True
+            return
+        if laps == 0:
             return
 
         used = (last_level - level) / laps
@@ -2204,8 +2313,14 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 self._last_lap_clean
                 if not self._fuel_marker_is_partial and laps == 1 else None)
             # The lap recorder ran earlier this poll and could not know the
-            # burn yet, so fill it in on the record it just created.
-            if self._laps and self._laps[-1].lap == completed:
+            # burn yet, so fill it in on the lap it is holding for its time —
+            # but only a measurement of that one whole lap is its burn.
+            pending = getattr(self, "_pending_lap", None)
+            if self._last_lap_fuel_clean is None:
+                pass
+            elif pending is not None and pending["lap"] == completed:
+                pending["fuel_used"] = self._last_lap_fuel
+            elif self._laps and self._laps[-1].lap == completed:
                 self._laps[-1].fuel_used = self._last_lap_fuel
         # An in-lap, an out-lap or a lap behind a safety car burns far less
         # than a racing lap. Averaged in, one of them overstated the range by
@@ -2217,7 +2332,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # arrive.
         if self._fuel_marker_is_partial:
             self._fuel_marker_is_partial = False
-        elif 0.05 < used < 50.0 and self._last_lap_clean:
+        elif 0.05 < used < 50.0 and self._last_lap_clean \
+                and not getattr(self, "_last_lap_caution", False):
             self._fuel_usage.append(used)
         self._fuel_marker = (completed, level)
         self._fuel_minimum = level
@@ -2464,15 +2580,33 @@ class iRacingTelemetryReader(TelemetryAdapter):
             progress = min(1.0, max(0.0, float(self._get("LapDistPct", 0.0))))
         except (TypeError, ValueError):
             progress = 0.0
+        leader = self._leader_progress()
+        if leader is None:
+            leader = progress
+        # The distance the leader still has to cover, in laps. Both limits
+        # are the leader's: SessionLapsRemainEx counts down as the leader
+        # crosses the line — two recorded races show it moving with the
+        # driver at 0.99 and at 0.29 of their lap, never at their own
+        # crossing — and a timed race ends at the leader's first crossing
+        # after the clock. Read against the driver's own progress, both were
+        # a lap short for every car not leading, for the whole stretch
+        # between the leader's crossing and theirs: a lap of fuel missing
+        # from "fuel's fine".
+        remaining = None
         if track.laps_remaining is not None:
-            laps_to_go = max(0.0, float(track.laps_remaining) - progress)
+            remaining = float(track.laps_remaining) - leader
         elif track.time_remaining is not None:
             lap_time = self._representative_lap()
             if lap_time:
-                laps_to_go = max(
-                    0.0,
-                    math.ceil(track.time_remaining / lap_time + progress) - progress,
-                )
+                remaining = math.ceil(track.time_remaining / lap_time + leader) - leader
+        if remaining is not None:
+            # The driver finishes at their first crossing once the leader has.
+            # The epsilon is float noise: for the leader, progress + (L -
+            # progress) is L plus a hair, and ceil would add a lap.
+            laps_to_go = max(0.0, math.ceil(progress + remaining - 1e-9) - progress)
+        finish = self._past_the_flag(progress)
+        if finish is not None:
+            laps_to_go = finish
 
         if laps_to_go is None or not car_fuel_per_lap:
             return laps_to_go, None, None
@@ -2485,13 +2619,64 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 self._fuel(needed),
                 self._fuel(have - needed))
 
+    def _leader_progress(self) -> Optional[float]:
+        """How far round their lap the race leader is, 0-1, in a green race.
+
+        From the live order, whose fraction is already corrected for the
+        tick where a lap counter moves before the distance wraps. None when
+        there is no live order to read it from.
+        """
+        state = _SESSION_STATES.get(self._get("SessionState"), "")
+        if session_kind(self._session_type()) != "race" or state != "Racing":
+            return None
+        order = self._live_order()
+        if not order:
+            return None
+        covered = order[0][0]
+        return covered - math.floor(covered)
+
+    def _past_the_flag(self, progress: float) -> Optional[float]:
+        """Laps to go once the leader has the chequered flag, else None.
+
+        SessionLapsRemainEx reads 0 from the leader's finish, while everyone
+        behind still has the rest of their lap to run. They finish at their
+        next crossing; after it there is nothing left.
+        """
+        state = _SESSION_STATES.get(self._get("SessionState"), "")
+        if state != "Checkered" or session_kind(self._session_type()) != "race":
+            self._checkered_lap = None
+            return None
+        completed = _int_or(self._get("LapCompleted"), None)
+        if getattr(self, "_checkered_lap", None) is None:
+            self._checkered_lap = completed
+        if completed is None or completed > self._checkered_lap:
+            return 0.0
+        return max(0.0, 1.0 - progress)
+
+    def _nearest_on_track(self, my_idx: int, idx: int, ahead: bool) -> bool:
+        """Whether `idx` is the first car on the road ahead of (or behind)
+        the driver — the car CarDistAhead / CarDistBehind is measuring."""
+        pcts = self._get("CarIdxLapDistPct") or []
+        mine = _at(pcts, my_idx)
+        if mine is None or mine < 0:
+            return False
+        nearest, best = None, None
+        for other, pct in enumerate(pcts):
+            if other == my_idx or pct is None or pct < 0:
+                continue
+            delta = ((pct - mine) if ahead else (mine - pct)) % 1.0
+            if best is None or delta < best:
+                nearest, best = other, delta
+        return nearest == idx
+
     def _direct_gap(self, ahead: bool) -> Tuple[Optional[float], Optional[float]]:
         """Gap from CarDistAhead / CarDistBehind — metres, and seconds.
 
         Per the iRacing SDK variable list these are "distance to first car in
-        front of / behind player, in meters". That is the number a relative
-        display shows. Deriving it from CarIdxEstTime differences (what this
-        used to do) compounds every per-car estimate and drifts.
+        front of / behind player, in meters": the nearest car on the road,
+        whichever it is. The seconds are that distance over the driver's own
+        speed, which is only a rough figure — it is the fallback when there
+        is no timing gap, never the first choice; see _rivals().
         """
         metres = self._get("CarDistAhead" if ahead else "CarDistBehind")
         try:
@@ -2750,12 +2935,21 @@ class iRacingTelemetryReader(TelemetryAdapter):
             _, idx = order[rank]
             info = drivers.get(idx, {})
 
-            # Prefer iRacing's own distance channel; fall back to the
-            # position-delta estimate only when it is not published.
+            # The spoken gap is the timing gap. CarDistAhead divided by the
+            # driver's own speed swung by a factor of two inside a single
+            # lap in every recorded race — 3.0 to 6.2 s at Bathurst while
+            # the real gap barely moved — because the speed is the driver's
+            # at this corner, not either car's over the distance between.
+            # The metres are still the best close-quarters figure, but only
+            # when they measure this car: CarDistAhead is the nearest car on
+            # the road, and with traffic that is not the car the race order
+            # names.
             metres, seconds = self._direct_gap(ahead)
+            if not self._nearest_on_track(my_idx, idx, ahead):
+                metres = seconds = None
             timing_gap = self._gap_seconds(
                 my_idx, idx, ahead, est_times, lap_time)
-            gap = seconds if seconds is not None else timing_gap
+            gap = timing_gap if timing_gap is not None else seconds
 
             laps_down = 0
             try:

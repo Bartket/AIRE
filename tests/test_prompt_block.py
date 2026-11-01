@@ -460,3 +460,11 @@ def test_the_block_and_a_tool_give_one_gap_one_value():
                    TrackConfig(session_type="Race", field=[ahead]))
     assert "Silva (car 16) — 4.4 seconds" in block
     assert race_math._spoken_gap(4.35) == "4.4 seconds"
+
+
+def test_rain_is_written_with_its_unit():
+    """"rain 0.15" left the model to guess what the number counted."""
+    from ai_race_engineer.prompt_builder import _weather
+
+    line = _weather(_car(rain_intensity=15.0))
+    assert "rain 15%" in line

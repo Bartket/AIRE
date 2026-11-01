@@ -215,6 +215,11 @@ class LapRecord:
 # three bad laps, they are a car that has slowed down — damage, usually.
 OFF_THE_MEDIAN = "well off the median"
 
+# The note on a lap iRacing did not time (it publishes -1): a reset, a tow,
+# a pit stop inside the lap. Kept in the history for where it happened, but
+# it says nothing about the driving.
+NO_LAP_TIME = "no lap time"
+
 
 @dataclass
 class TyreState:
@@ -418,7 +423,7 @@ class CarTelemetry:
     # Weather
     track_surface_temp: float = 0.0
     air_temp: float = 0.0
-    rain_intensity: float = 0.0
+    rain_intensity: float = 0.0   # precipitation at the line, percent
 
     # Incidents. iRacing counts these per driver / per team; None means the
     # channel is not published for this session type.
@@ -440,7 +445,12 @@ class CarTelemetry:
     warnings: List[str] = field(default_factory=list)
     track_surface: Optional[str] = None    # on track / off track / pit stall
     pit_service_status: Optional[str] = None
-    avg_lap_time: Optional[float] = None   # rolling average over clean laps
+    # LapLastNLapTime: iRacing's average over its own lap-averaging window.
+    # It read 0 in all 53 recorded sessions, so nothing may depend on it.
+    avg_lap_time: Optional[float] = None
+    # The lap time the reader converts clocks into laps with: the mean of
+    # the recent clean laps. See race_math.pace_lap().
+    pace_lap: Optional[float] = None
     fast_repair_used: Optional[int] = None
     fast_repair_available: Optional[int] = None
     pit_service_pending: bool = False

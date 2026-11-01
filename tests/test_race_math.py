@@ -547,6 +547,35 @@ def test_a_truncated_history_says_so():
     assert rm.race_history(_car(position=4), short)["history_partial"] is False
 
 
+def test_the_stint_projection_plans_on_the_same_burn_as_the_fuel_call():
+    """Mean burn 3.2, highest 3.5, 40 L, 12 laps to run. fuel_plan plans on
+    3.5 and will not call the tank enough (42 L needed); on the mean the
+    projection said half a lap in hand. Two answers to one question."""
+    car = _car(fuel_level=40.0, fuel_per_lap=3.2, fuel_burn_min=3.0,
+               fuel_burn_max=3.5, fuel_burn_samples=5, laps_to_go=12.0)
+    track = TrackConfig(session_type="Race", laps_remaining=12)
+
+    assert rm.fuel_plan(car, track)["fuel_margin_conservative"] < 0
+    result = rm.stint_projection(car, track)
+    assert result["surplus_laps"] < 0
+    assert "short" in result["spoken"]
+
+
+def test_one_stop_across_the_line_is_one_stop():
+    """Where the pit lane crosses the start/finish line, the in-lap and the
+    out-lap both touch the pit lane. That is one stop, not two."""
+    laps = [LapRecord(lap=n, time=90.0, position=4, session_num=2)
+            for n in range(1, 9)]
+    for n in (4, 5):
+        laps[n - 1].clean, laps[n - 1].note = False, "pit lane"
+    track = TrackConfig(session_type="Race", session_num=2, laps=laps,
+                        grid_position=4)
+    result = rm.race_history(_car(position=4), track)
+
+    assert "stopped on lap 4" in result["spoken"]
+    assert "2 stops" not in result["spoken"]
+
+
 def test_race_history_cannot_claim_places_lost_on_the_formation_lap():
     """The live report said P7 to P16 before the race had even started."""
     track = TrackConfig(session_type="Race", session_num=2,
@@ -1076,6 +1105,17 @@ def test_fuel_for_a_number_of_minutes_is_converted_here_not_by_the_model():
     assert "14 laps" in result["spoken"]
     # It must not be passed off as a known lap count.
     assert "estimate" in result["spoken"]
+
+
+def test_minutes_become_laps_at_the_same_pace_the_reader_uses():
+    """LapLastNLapTime read 0 in every recorded session, so this divided by
+    the last lap alone while the reader's laps-to-go used the mean of the
+    recent clean ones. A slow last lap made the two disagree."""
+    car = _car(fuel_level=40.0, fuel_per_lap=3.2, pace_lap=100.0,
+               last_lap_time=80.0, avg_lap_time=None)
+    track = TrackConfig(session_type="Race", laps_remaining=10)
+    result = rm.fuel_plan(car, track, target_minutes=10)
+    assert result["laps_to_go"] == 6.0           # 600 s / 100 s, not / 80 s
 
 
 def test_fuel_for_minutes_declines_without_a_lap_time():
@@ -2084,7 +2124,7 @@ def test_closing_trend_uses_estimated_time_at_fixed_track_points():
     assert "ahead.trend_gap" in source
     assert "behind.trend_gap" in source
     assert "timing_gap = self._gap_seconds" in rivals
-    assert "gap = seconds if seconds is not None else timing_gap" in rivals
+    assert "gap = timing_gap if timing_gap is not None else seconds" in rivals
 
 
 def test_flat_or_missing_distance_never_reuses_a_closing_call():

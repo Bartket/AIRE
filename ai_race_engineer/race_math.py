@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import car_names, pronounce
 from .keyterms import _surname as _surname_of
-from .telemetry import (OFF_THE_MEDIAN, CarTelemetry, Rival, TelemetrySnapshot,
-                        TrackConfig, session_kind)
+from .telemetry import (NO_LAP_TIME, OFF_THE_MEDIAN, CarTelemetry, Rival,
+                        TelemetrySnapshot, TrackConfig, session_kind)
 from .text import normalise_question
 
 logger = logging.getLogger("race-engineer")
@@ -382,6 +382,21 @@ def _plural(count: float, word: str) -> str:
     return f"{count:.0f} {word}" + ("" if abs(count - 1) < 0.5 else "s")
 
 
+def pace_lap(car: CarTelemetry) -> Optional[float]:
+    """The lap time to turn a clock into laps, or None.
+
+    One answer for every caller. The reader's laps-to-go divides by the mean
+    of recent clean laps; these used LapLastNLapTime first, which read 0 in
+    every recorded session, so in practice they divided by the single last
+    lap — and the same question got two lap counts.
+    """
+    for lap in (getattr(car, "pace_lap", None), car.avg_lap_time,
+                car.last_lap_time, car.best_lap_time):
+        if lap and lap > 0:
+            return lap
+    return None
+
+
 def _laps_to_go(car: CarTelemetry, track: TrackConfig) -> Optional[float]:
     """How many laps are actually left to run.
 
@@ -397,8 +412,8 @@ def _laps_to_go(car: CarTelemetry, track: TrackConfig) -> Optional[float]:
     if track.laps_remaining is not None:
         return max(0.0, float(track.laps_remaining) - progress)
     if track.time_remaining is not None:
-        lap = car.avg_lap_time or car.last_lap_time or car.best_lap_time
-        if lap and lap > 0:
+        lap = pace_lap(car)
+        if lap:
             # The clock can expire between crossings. Finish is the first
             # start/finish crossing after that, so account for how far the
             # current lap has already been driven.
@@ -437,7 +452,7 @@ def session_limit(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     kind = session_kind(track.session_type)
     laps_left = track.laps_remaining
     time_left = track.time_remaining
-    lap = car.avg_lap_time or car.last_lap_time or car.best_lap_time
+    lap = pace_lap(car)
     clock_laps = (time_left / lap) if (time_left is not None and lap and lap > 0) else None
 
     if laps_left is None and time_left is None:
@@ -843,8 +858,8 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     if target_laps is not None:
         laps = float(target_laps)
     elif target_minutes is not None:
-        lap_time = car.avg_lap_time or car.last_lap_time or car.best_lap_time
-        if not lap_time or lap_time <= 0:
+        lap_time = pace_lap(car)
+        if not lap_time:
             return _no("I need a lap time before I can turn minutes into laps.")
         # Partial laps still have to be driven, so round up.
         laps = math.ceil(float(target_minutes) * 60.0 / lap_time)
@@ -1055,7 +1070,7 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
         burn_last_lap=last,
         burn_last_lap_clean=car.fuel_last_lap_clean,
         burn_this_stint=car.fuel_used_stint,
-        burn_basis="clean racing laps; in-laps, out-laps and caution laps excluded "
+        burn_basis="clean racing laps; in-laps, out-laps, caution and formation laps excluded "
                    "from the average; burn_last_lap is raw and only changes the "
                    "range call when burn_last_lap_clean is true",
         burn_per_lap=round(typical_burn, 3),
@@ -1099,7 +1114,7 @@ def pit_window(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     typical_burn, burn_low, burn_high, burn_samples, fuel_confidence = \
         _fuel_burn_bounds(car)
     if typical_burn is None or burn_low is None or burn_high is None:
-        return _no("I need three green laps before I can call your pit window.")
+        return _no("I need a couple of green laps before I can call your pit window.")
     per_lap = burn_high
     have = car.fuel_level
     if have is None:
@@ -2563,8 +2578,13 @@ def race_history(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     timed = [l for l in laps if l.time > 0]
     best = min(timed, key=lambda l: l.time) if timed else None
     pit_laps = [l.lap for l in laps if l.note == "pit lane"]
+    # One stop can touch two laps — in on one, out on the next where the pit
+    # lane crosses the line — so a run of consecutive pit laps is one stop,
+    # named by the lap it began on.
+    stops = [lap for n, lap in enumerate(pit_laps)
+             if n == 0 or pit_laps[n - 1] != lap - 1]
     scrappy = [{"lap": l.lap, "note": l.note} for l in laps
-               if not l.clean and l.note and l.note != "pit lane"]
+               if not l.clean and l.note and l.note not in ("pit lane", NO_LAP_TIME)]
 
     # The reader keeps a bounded history, so a long race can outrun it. Say
     # so rather than describing the last hundred laps as the whole race.
@@ -2589,9 +2609,9 @@ def race_history(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     laps_led = getattr(track, "laps_led", None)
     if laps_led:
         bits.append(f"you've led {_plural(laps_led, 'lap')}")
-    if pit_laps:
-        bits.append(f"stopped on lap {pit_laps[-1]}" if len(pit_laps) == 1
-                    else f"{_plural(len(pit_laps), 'stop')}, last on lap {pit_laps[-1]}")
+    if stops:
+        bits.append(f"stopped on lap {stops[-1]}" if len(stops) == 1
+                    else f"{_plural(len(stops), 'stop')}, last on lap {stops[-1]}")
     if scrappy:
         bits.append(f"{_plural(len(scrappy), 'scrappy lap')} — {scrappy[-1]['note']} on lap {scrappy[-1]['lap']}")
     cautions = getattr(track, "caution_flags", None)
@@ -2629,8 +2649,11 @@ def stint_projection(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
         return _no("There's no race distance to compare against in this session.")
 
     laps = _laps_to_go(car, track)
-    if car.fuel_level is not None and car.fuel_per_lap:
-        range_laps = car.fuel_level / car.fuel_per_lap
+    # The highest clean-lap burn, as fuel_plan and pit_window plan with. On
+    # the mean, this said "laps in hand" to a driver fuel_plan called short.
+    _, _, burn_high, _, _ = _fuel_burn_bounds(car)
+    if car.fuel_level is not None and burn_high:
+        range_laps = car.fuel_level / burn_high
     else:
         range_laps = car.fuel_remaining_laps
     if range_laps is None:

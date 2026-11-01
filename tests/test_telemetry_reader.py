@@ -8,7 +8,7 @@ it is where those go wrong silently.
     uv run pytest tests/ -q
 """
 
-from ai_race_engineer.telemetry import TrackConfig
+from ai_race_engineer.telemetry import NO_LAP_TIME, LapRecord, TrackConfig
 from ai_race_engineer.telemetry.irsdk_reader import iRacingTelemetryReader
 
 
@@ -164,6 +164,47 @@ def test_car_identity_reaches_the_field_and_the_physical_neighbour():
     assert behind.class_est_lap_time == 88.2
 
 
+def _three_car_order(**values):
+    """You (0) in second, the car ahead in the order (1), and a lapped car
+    (2) on the road between you."""
+    channels = {
+        "PlayerCarIdx": 0, "SessionNum": 0, "SessionState": 4, "Speed": 20.0,
+        "CarIdxLapCompleted": [5, 5, 4], "CarIdxLap": [6, 6, 5],
+        "CarIdxLapDistPct": [0.40, 0.45, 0.42],
+        "CarIdxEstTime": [36.0, 40.5, 38.0],
+        "LapBestLapTime": 90.0, "CarDistAhead": 40.0,
+    }
+    channels.update(values)
+    return _Reader(channels, {
+        "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]},
+        "DriverInfo": {"Drivers": [
+            _driver(0, "You", 1, "Cup", 1, "Car", "Car"),
+            _driver(1, "Rossi", 1, "Cup", 1, "Car", "Car"),
+            _driver(2, "Backmarker", 1, "Cup", 1, "Car", "Car")]},
+    })
+
+
+def test_the_spoken_gap_is_the_timing_gap_not_distance_over_speed():
+    """40 m at 20 m/s through a hairpin is "2 seconds"; the same 40 m down
+    the straight at 70 m/s is "0.6". In the recordings that swung 3.0 to
+    6.2 s inside one lap with the cars barely moving apart."""
+    reader = _three_car_order(CarIdxLapDistPct=[0.40, 0.45, 0.10])
+    ahead, _ = reader._rivals()
+    assert ahead.name == "Rossi"
+    assert ahead.gap == 4.5                  # CarIdxEstTime, 40.5 - 36.0
+    assert ahead.gap_metres == 40.0          # Rossi is the next car on the road
+
+
+def test_distance_to_a_different_car_is_not_put_against_the_named_one():
+    """CarDistAhead is the nearest car on the road. Here that is a lapped
+    car, so 40 m says nothing about how far ahead Rossi is."""
+    reader = _three_car_order()
+    ahead, _ = reader._rivals()
+    assert ahead.name == "Rossi"
+    assert ahead.gap == 4.5
+    assert ahead.gap_metres is None
+
+
 def test_series_specific_resources_use_published_optional_channels(monkeypatch):
     from ai_race_engineer.telemetry import irsdk_reader
 
@@ -316,14 +357,14 @@ def test_a_new_segment_rebaselines_the_lap_marker():
                       "LapLastLapTime": 92.0, "FuelLevel": 40.0,
                       "PlayerCarPosition": 5})
     reader._update_laps()                    # first poll: sets the marker
-    reader.values["LapCompleted"] = 15
+    reader.values.update({"LapCompleted": 15, "LapLastLapTime": 91.5})
     reader._update_laps()
     assert len(reader._laps) == 1
 
     # Qualifying rolls into the race and the count restarts from zero.
     reader.values.update({"SessionNum": 1, "LapCompleted": 0})
     reader._update_laps()
-    reader.values["LapCompleted"] = 1
+    reader.values.update({"LapCompleted": 1, "LapLastLapTime": 95.0})
     reader._update_laps()
 
     assert len(reader._laps) == 2
@@ -917,6 +958,178 @@ def test_the_drivers_own_caution_laps_are_tagged_but_stay_clean():
     laps = list(r._laps)
     assert [(l.lap, l.clean, l.caution) for l in laps] == [
         (5, True, True), (6, True, False)]
+
+
+def test_a_test_session_is_not_one_lap_to_green_all_session():
+    """Every recorded Offline Testing session has the one-lap-to-green bit
+    set on every sample (0x10040200 here, from a Bathurst test). In a race
+    or qualifying it is a real call; in practice there is no start."""
+    from ai_race_engineer.telemetry.irsdk_reader import _decode_flag
+
+    recorded = 0x10040200
+    assert _decode_flag(recorded, "practice") == "Green"
+    assert _decode_flag(recorded, "qualify") == "One lap to green"
+    assert _decode_flag(recorded, "race") == "One lap to green"
+    assert _decode_flag(recorded | 0x8, "practice") == "Yellow"
+
+
+def test_a_lap_behind_the_safety_car_is_not_averaged_into_the_burn():
+    """The fuel answer says caution laps are excluded, and they were not:
+    the caution verdict was kept for the catch projection and never reached
+    the fuel average, so a pace-car lap pulled the burn and its low bound
+    down — the bound the "marginal" call is made from."""
+    r = _Reader({"LapCompleted": 1, "FuelLevel": 50.0, "LapLastLapTime": 90.0,
+                 "SessionTime": 10.0, "SessionFlags": 0})
+
+    def poll(**values):
+        r.values.update(values)
+        r._update_laps()
+        r._update_fuel_usage()
+
+    poll()
+    poll(LapCompleted=2, FuelLevel=47.0, LapLastLapTime=90.1)   # partial marker
+    poll(LapCompleted=3, FuelLevel=44.0, LapLastLapTime=90.2)   # green: 3.0
+    poll(SessionFlags=0x00004000)                               # caution out
+    poll(LapCompleted=4, FuelLevel=42.8, LapLastLapTime=120.0)  # 1.2 behind it
+    poll(SessionFlags=0, LapCompleted=5, FuelLevel=39.8, LapLastLapTime=90.3)
+
+    assert list(r._fuel_usage) == [3.0, 3.0]
+    assert r._last_lap_fuel == 3.0
+
+
+def _two_car_race(my_pct, leader_pct, my_laps, leader_laps, **values):
+    """The driver (index 0) and the leader (index 1) in a green race."""
+    channels = {
+        "PlayerCarIdx": 0, "SessionNum": 0, "SessionState": 4,
+        "LapDistPct": my_pct, "LapCompleted": my_laps,
+        "CarIdxLapDistPct": [my_pct, leader_pct],
+        "CarIdxLapCompleted": [my_laps, leader_laps],
+        "CarIdxLap": [my_laps + 1, leader_laps + 1],
+    }
+    channels.update(values)
+    return _Reader(channels, {
+        "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]},
+        "DriverInfo": {"Drivers": [
+            _driver(0, "You", 1, "Cup", 1, "Car", "Car"),
+            _driver(1, "Leader", 1, "Cup", 1, "Car", "Car")]},
+    })
+
+
+def test_laps_to_go_count_from_the_leader_not_from_the_driver():
+    """SessionLapsRemainEx is the leader's count. Recorded at Bathurst: the
+    driver, P13, at 0.329 of lap 7 when it ticked down to 6 — the leader had
+    just crossed. 13 laps, 6 done: 6.67 to go, not 5.67. A lap of fuel short
+    of the truth, in the direction that says "you'll make it"."""
+    r = _two_car_race(0.329, 0.001, my_laps=6, leader_laps=7)
+    laps_to_go, _, _ = r._strategy(3.2, None, TrackConfig(laps_remaining=6))
+    assert round(laps_to_go, 3) == 6.671
+
+
+def test_the_leaders_own_laps_to_go_are_unchanged():
+    r = _two_car_race(0.4, 0.3, my_laps=7, leader_laps=6)   # driver leads
+    laps_to_go, _, _ = r._strategy(3.2, None, TrackConfig(laps_remaining=6))
+    assert round(laps_to_go, 3) == 5.6
+
+
+def test_a_timed_race_ends_on_the_leaders_crossing():
+    """30 s on the clock, 100 s laps. The leader crosses in 5 s with time
+    still running, so the leader — and so the driver — has another lap. Off
+    the driver's own progress it read as finishing at their next crossing."""
+    r = _two_car_race(0.6, 0.95, my_laps=8, leader_laps=8, LapLastLapTime=100.0)
+    r._laps.append(LapRecord(lap=8, time=100.0))
+    laps_to_go, _, _ = r._strategy(
+        3.2, None, TrackConfig(time_remaining=30.0))
+    assert round(laps_to_go, 3) == 1.4
+
+
+def test_after_the_leaders_flag_the_driver_still_has_their_lap():
+    """The count reads 0 from the leader's finish; the driver behind still
+    has to get round to the line."""
+    r = _two_car_race(0.32, 0.5, my_laps=12, leader_laps=13, SessionState=5)
+    laps_to_go, _, _ = r._strategy(3.2, None, TrackConfig(laps_remaining=0))
+    assert round(laps_to_go, 2) == 0.68
+    r.values.update(LapCompleted=13, LapDistPct=0.01)
+    laps_to_go, _, _ = r._strategy(3.2, None, TrackConfig(laps_remaining=0))
+    assert laps_to_go == 0.0
+
+
+def test_the_run_from_the_grid_is_not_lap_ones_burn():
+    """Every recorded race puts the car on the grid by taking LapCompleted
+    from 0 to -1. The marker planted before that measured lap 1 from the
+    grid, start and all: 1.776 L at Imola for a 1.548 L lap. Figures below
+    are that race's, at its crossings."""
+    r = _Reader({"LapCompleted": 0, "FuelLevel": 32.0, "SessionTime": 36.0})
+
+    def poll(**values):
+        r.values.update(values)
+        r._update_laps()
+        r._update_fuel_usage()
+
+    poll()
+    poll(LapCompleted=-1, SessionTime=36.3)                       # on the grid
+    poll(LapCompleted=0, FuelLevel=31.773, SessionTime=55.3)      # the start
+    poll(LapCompleted=1, FuelLevel=30.225, SessionTime=164.4,
+         LapLastLapTime=109.1)
+    poll(LapCompleted=2, FuelLevel=28.766, SessionTime=264.9,
+         LapLastLapTime=100.5)
+
+    assert r._last_lap_fuel == 1.459
+    assert [round(x, 3) for x in r._fuel_usage] == [1.548, 1.459]
+    assert r._laps[0].lap == 1 and r._laps[0].fuel_used == 1.548
+
+
+def test_track_wetness_uses_the_sdks_names():
+    """The table written from memory called level 3 "damp" and 5 "wet";
+    the SDK's TrackWetness says very lightly wet and moderately wet."""
+    from ai_race_engineer.telemetry.irsdk_reader import _TRACK_WETNESS, _enum_map
+
+    names = _enum_map("TrackWetness", _TRACK_WETNESS)
+    assert names[3] == "very lightly wet"
+    assert names[5] == "moderately wet"
+
+
+def _lap_poll(r, **values):
+    r.values.update(values)
+    r._update_laps()
+
+
+def test_a_lap_waits_for_its_own_time():
+    """LapLastLapTime settles up to 2.1 s after LapCompleted moves. The lap
+    is recorded when the time changes, not when the count does."""
+    r = _Reader({"LapCompleted": 4, "LapLastLapTime": 91.0, "SessionTime": 100.0})
+    r._update_laps()
+    _lap_poll(r, LapCompleted=5, SessionTime=100.1)       # count moved, time not
+    assert list(r._laps) == []
+    _lap_poll(r, LapLastLapTime=90.4, SessionTime=101.5)
+    assert [(l.lap, l.time) for l in r._laps] == [(5, 90.4)]
+
+
+def test_a_lap_iracing_did_not_time_is_kept_without_a_time():
+    """-1 is iRacing's "no valid time" — a pit stop inside the lap, a reset.
+    The lap is where that happened, so it stays in the history, but it can
+    never be averaged or ranked."""
+    r = _Reader({"LapCompleted": 4, "LapLastLapTime": 91.0, "SessionTime": 100.0})
+    r._update_laps()
+    _lap_poll(r, OnPitRoad=True, SessionTime=150.0)
+    _lap_poll(r, LapCompleted=5, OnPitRoad=False, SessionTime=200.0)
+    _lap_poll(r, LapLastLapTime=-1.0, SessionTime=201.0)
+
+    (lap,) = r._laps
+    assert (lap.lap, lap.time, lap.clean, lap.note) == (5, 0.0, False, "pit lane")
+
+
+def test_a_time_that_never_moves_is_not_taken_for_the_new_lap():
+    """Two untimed laps in a row read -1 then -1: nothing changes, and the
+    old value must not be recorded as the new lap's time."""
+    r = _Reader({"LapCompleted": 4, "LapLastLapTime": -1.0, "SessionTime": 100.0})
+    r._update_laps()
+    _lap_poll(r, LapCompleted=5, SessionTime=100.1)
+    _lap_poll(r, SessionTime=102.0)
+    assert list(r._laps) == []                            # still waiting
+    _lap_poll(r, SessionTime=103.2)
+
+    (lap,) = r._laps
+    assert (lap.lap, lap.time, lap.clean, lap.note) == (5, 0.0, False, NO_LAP_TIME)
 
 
 def test_the_recorded_laps_reach_the_rivals_row_in_the_order():

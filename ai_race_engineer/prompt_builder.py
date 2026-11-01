@@ -588,7 +588,7 @@ def _weather(car) -> str:
     if car.track_wetness:
         bits.append(f"surface {car.track_wetness}")
     if car.rain_intensity:
-        bits.append(f"rain {car.rain_intensity:.2f}")
+        bits.append(f"rain {car.rain_intensity:.0f}%")
     if car.declared_wet:
         bits.append("DECLARED WET — wet tyres allowed")
     if car.skies:
@@ -986,7 +986,7 @@ def _repairs(car, track) -> list:
                        " costs only the time it takes."]
 
     laps = race_math._laps_to_go(car, track)
-    lap = car.avg_lap_time or car.last_lap_time or car.best_lap_time
+    lap = race_math.pace_lap(car)
     weigh = ("Weigh that repair time, plus the pit lane and the places a stop gives"
              " away, against ")
     if laps is not None and lap:
