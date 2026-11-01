@@ -8,6 +8,13 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Changed
 
+- “Is the car behind catching me?” is now answered with a lap count to the
+  flag rather than only the last few corners' trend. “Am I gaining?” and
+  “is the gap closing?” still get the live trend. Comparing best laps no
+  longer predicts who catches whom: a damaged car's best was set before the
+  damage, and a car that spun keeps its best, so it called a car that was
+  closing “dropping away”.
+
 - The status bar says what is going on in plain words. What the engineer is
   doing — listening, recording, thinking, speaking — is a badge on the left;
   each check on the right is a button that opens the tab that fixes it.
@@ -71,6 +78,20 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Added
 
+- **“Will he catch me?”** — and “when”, “is anyone going to catch me”, “can
+  I hold position to the end”, “will I lose a place”, “can I catch the car
+  ahead”. The engineer compares each car's last three clean laps with yours
+  and works out whether the gap closes before the flag: “Kowalski catches
+  you in about 6 laps, 9 to go”, “it'll be right at the flag”, or “he runs
+  out of laps, a second and a half short”. With no car named it looks at
+  the next three cars racing you for the place — same class, same lap —
+  so a damaged car can tell whether staying out keeps the position, and it
+  adds the repair time iRacing reports. It does not say whether to pit:
+  what a stop costs is not published. Pit, off-track and caution laps are
+  left out of everyone's pace, and so is your own pace from before damage.
+  Until there are three clean laps it says what the gap is doing right now
+  instead. “Catch” means the gap closes; whether he then gets by is racing.
+  Rival lap recording has not yet run in a live iRacing session.
 - **Ask me to confirm “pit stop …” commands**, on the Race tab, on by
   default. Off, a command starting with *pit stop* is set as soon as it is
   spoken and read back as set. Commands in your own words are always

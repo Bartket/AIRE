@@ -31,8 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import car_names, pronounce
 from .keyterms import _surname as _surname_of
-from .telemetry import (CarTelemetry, Rival, TelemetrySnapshot, TrackConfig,
-                        session_kind)
+from .telemetry import (OFF_THE_MEDIAN, CarTelemetry, Rival, TelemetrySnapshot,
+                        TrackConfig, session_kind)
+from .text import normalise_question
 
 logger = logging.getLogger("race-engineer")
 
@@ -49,6 +50,7 @@ logger = logging.getLogger("race-engineer")
 SPOKEN_VERBATIM = frozenset({
     "fuel_plan", "pit_window", "position_report", "adjacent_gap_trend",
     "car_resources", "race_control_report", "status_report", "car_check",
+    "catch_projection",
 })
 
 # The radio budget for anything in SPOKEN_VERBATIM while a session is running.
@@ -275,6 +277,105 @@ def fuel_radio(result: Dict[str, Any], question: str) -> str:
     if tank and asks_for_amount(question):
         return f"{tank} {spoken}"
     return spoken
+
+
+# Wording that asks whether a car will reach another — "will he catch me",
+# "can I hold him off to the end", "how long till he's on my gearbox". All
+# of it is answered from lap pace by `catch_projection`. Matched as whole
+# phrases inside the padded question.
+_CATCH_PHRASES = (
+    "on me", "on my gearbox", "on my tail", "on my bumper",
+    "pass me", "passes me", "passing me", "overtake me", "get passed",
+    "be passed", "get past me", "get by me",
+    "hold him off", "hold them off", "hold her off",
+    "keep him behind", "keep them behind",
+    "hold position", "hold the position", "hold my position",
+    "hold the place", "hold my place", "hold on to", "hold onto",
+    "hold on till", "hold on until", "keep the position", "keep my position",
+    "keep the place", "keep my place",
+    "lose a place", "lose a position", "lose the place", "lose the position",
+    "lose places", "lose positions", "lose a spot", "lose the spot",
+    "losing a place", "losing the place", "losing a position",
+    "losing the position",
+)
+# The driver is the one being caught.
+_CAUGHT_CUES = ("catch me", "catches me", "catching me", "caught", "behind",
+                "anyone", "anybody", "someone", "somebody", "nobody",
+                "the pack", "chasing", "following") + _CATCH_PHRASES
+# The driver is the one doing the catching.
+_CATCHING_CUES = ("i catch", "i catching", "we catch", "we catching",
+                  "catch him", "catch them", "catch her", "catching him",
+                  "catching them", "catching her", "catch up", "catch the car",
+                  "catch the guy", "ahead", "in front")
+# "Did you catch that?" is a radio check, and being caught speeding is a
+# penalty, not a car.
+_NOT_A_CATCH = ("catch that", "catch what", "caught that", "speeding",
+                "penalty", "penalised", "penalized", "black flag",
+                "drive through", "stop and go")
+# Every word a catch question can use without naming a particular car. A
+# word outside this — a name, "44", "P6", "the leader" — means the driver
+# asked about a car this classifier cannot pick, so the question goes to the
+# model, whose tool call names it. Failing toward the model, never toward
+# the wrong car.
+_CATCH_VOCABULARY = frozenset("""
+    i im me my we us our you your he hes him his she shes her they theyre
+    theyll them their hell shell ill well anyone anybody someone somebody
+    nobody no one guy guys car cars driver pack mate
+    is are am was were will would wont can cant could should do does did dont
+    isnt arent going gonna gunna to get getting be been being let
+    the a an any of at in on by before after till til until untill end flag
+    finish race chequered checkered line when how long many much soon laps lap
+    more what whats which who whos if this that rate pace current still ever
+    actually really think reckon tell know and or so then now yet for about
+    roughly approximately time it its
+    behind ahead front catch catches catching caught up pass passes passing
+    passed past overtake hold holding keep keeping off onto lose losing
+    place places position positions spot spots gearbox tail bumper chasing
+    following gaining gain closing gap
+""".split())
+# Live movement, answered by the mini-sector trend rather than lap pace.
+_TREND_TERMS = ("gain", "closing", "close the gap", "gap opening",
+                "gap increasing", "gap decreasing", "pulling away",
+                "dropping back", "reeling")
+_TREND_AHEAD = ("car ahead", "car in front", "guy ahead", "guy in front")
+_TREND_BEHIND = ("car behind", "guy behind", "behind me")
+
+
+def catch_intent(question: str) -> Optional[Tuple[str, str]]:
+    """Whether a question asks about one car reaching another, and which way.
+
+    Returns ("projection", direction) for anything about being caught or
+    catching — present tense included, because "is he catching me?" is
+    asked to find out whether he will — ("trend", direction) for live gap
+    movement, and None for anything else, including a catch question about
+    a car named rather than placed. Direction is "behind" when the driver is
+    the one being caught and "ahead" when they are doing the catching.
+
+    One classifier, here, because the deterministic router and the eval
+    grader must agree on it: a grader that disagrees grades a route that was
+    never taken.
+    """
+    q = normalise_question(question)
+    padded = f" {q} "
+    if any(f" {term} " in padded for term in _NOT_A_CATCH):
+        return None
+    words = q.split()
+    projection = (any(w.startswith("catch") or w == "caught" for w in words)
+                  or any(f" {phrase} " in padded for phrase in _CATCH_PHRASES))
+    if projection:
+        caught = any(f" {cue} " in padded for cue in _CAUGHT_CUES)
+        catching = any(f" {cue} " in padded for cue in _CATCHING_CUES)
+        if caught == catching:
+            return None
+        if any(w not in _CATCH_VOCABULARY for w in words):
+            return None
+        return ("projection", "behind" if caught else "ahead")
+    if any(term in q for term in _TREND_TERMS):
+        ahead = any(cue in q for cue in _TREND_AHEAD)
+        behind = any(cue in q for cue in _TREND_BEHIND)
+        if ahead or behind:
+            return ("trend", "ahead" if ahead else "behind")
+    return None
 
 
 def _plural(count: float, word: str) -> str:
@@ -1579,6 +1680,357 @@ def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
     )
 
 
+# ── Being caught, and catching ──────────────────────────────────────
+
+# Laps of pace taken from each car. Three, not five: damage changes a car's
+# pace in one step, and laps from before it would understate the loss.
+_CATCH_LAPS = 3
+# Seconds a lap. Below this the difference is noise — pace_trend's floor.
+_CLOSING_FLOOR = 0.05
+# A gap this small is already a fight, not something still to come.
+_ON_YOU = 0.5
+# Three laps this close together are a pace, not three separate accidents.
+_STEP_SPREAD = 1.0
+# Cars behind looked at when the driver names none.
+_PACK = 3
+# Flags under which a gap says nothing about who is quicker.
+_NEUTRALISED = ("Caution", "Caution Waving", "Red")
+
+
+def _this_segment(laps: List[Any], track: TrackConfig) -> List[Any]:
+    """Laps from the session segment running now; see `_race_laps`."""
+    current = getattr(track, "session_num", None)
+    if current is None:
+        return list(laps)
+    return [l for l in laps
+            if getattr(l, "session_num", None) in (current, None)]
+
+
+def _recent_pace(laps: List[Any]) -> Optional[float]:
+    """Mean of the last three representative laps, or None.
+
+    Pit, off and towed laps never count, and nor does a lap with a caution
+    in it. A lap marked only as well off the median is the exception: three
+    of them in a row at one pace are a car that has slowed — the damaged car
+    this projection exists for. Discarding them left its driver with no pace
+    at all, or worse, with the pace from before the damage.
+    """
+    usable = [l for l in laps
+              if l.time > 0 and not getattr(l, "caution", False)
+              and (l.clean or l.note == OFF_THE_MEDIAN)]
+    recent = [l.time for l in usable[-_CATCH_LAPS:]]
+    if len(recent) == _CATCH_LAPS and (
+            all(l.clean for l in usable[-_CATCH_LAPS:])
+            or max(recent) - min(recent) <= _STEP_SPREAD):
+        return sum(recent) / len(recent)
+    clean = [l.time for l in usable if l.clean][-_CATCH_LAPS:]
+    if len(clean) == _CATCH_LAPS:
+        return sum(clean) / len(clean)
+    return None
+
+
+def _gap_between(car: CarTelemetry, track: TrackConfig, me: Rival,
+                 them: Rival) -> Optional[float]:
+    """Seconds from the driver to another car: positive behind, negative ahead.
+
+    The live gap to a physical neighbour where that is the car, because it
+    is what the driver's own timing screen shows; otherwise the difference of
+    the two gaps to the leader, as `gap_to` does.
+    """
+    for live, sign in ((car.ahead, -1.0), (car.behind, 1.0)):
+        if live is not None and live.gap is not None \
+                and _classified(track, live) is them:
+            return sign * abs(live.gap)
+    my_gap = 0.0 if me.position == 1 else me.gap
+    their_gap = 0.0 if them.position == 1 else them.gap
+    if my_gap is None or their_gap is None:
+        return None
+    return their_gap - my_gap
+
+
+def _catch_one(car: CarTelemetry, track: TrackConfig, me: Rival, them: Rival,
+               my_pace: float, laps_to_go: float, estimate: bool) -> Dict[str, Any]:
+    """The projection for one car, as numbers and a verdict."""
+    row: Dict[str, Any] = {
+        "driver": them.name, "car_number": them.car_number,
+        "position": them.position, "verdict": None,
+        "_who": _radio_rival_name(them, track),
+    }
+    if them.in_pits:
+        row["verdict"] = "in_pits"
+        return row
+    gap = _gap_between(car, track, me, them)
+    if gap is None:
+        row["verdict"] = "no_gap"
+        return row
+    pace = _recent_pace(_this_segment(them.recent_laps, track))
+    behind = gap > 0
+    row.update(gap_seconds=round(abs(gap), 2), they_are_behind=behind)
+    if pace is None:
+        row["verdict"] = "no_pace"
+        return row
+    # Positive means the gap is shrinking, whichever car is doing the catching.
+    closing = (my_pace - pace) if behind else (pace - my_pace)
+    row.update(their_pace=round(pace, 3), laps_used=_CATCH_LAPS,
+               closing_per_lap=round(closing, 3))
+    if abs(gap) <= _ON_YOU:
+        row["verdict"] = "already_there"
+    elif closing < _CLOSING_FLOOR:
+        row["verdict"] = "not_closing"
+    else:
+        at_flag = abs(gap) - closing * laps_to_go
+        # A lap of closing either side of the flag is too close to call, and
+        # two when the lap count is itself an estimate from the clock.
+        margin = closing * (2.0 if estimate else 1.0)
+        row.update(laps_to_catch=round(abs(gap) / closing, 1),
+                   gap_at_flag=round(at_flag, 2))
+        if at_flag < -margin:
+            row["verdict"] = "catches"
+        elif at_flag <= max(margin, _ON_YOU):
+            row["verdict"] = "close"
+        else:
+            row["verdict"] = "holds"
+    return row
+
+
+def _about_laps(laps: float) -> str:
+    """Laps until contact, rounded down: early warning, never a late one."""
+    whole = max(1, math.floor(laps))
+    return "about a lap" if whole == 1 else f"about {whole} laps"
+
+
+def _to_go(laps_to_go: float, estimate: bool) -> str:
+    left = math.ceil(laps_to_go - 1e-9)
+    if left <= 1:
+        return "last lap"
+    return f"about {left} to go" if estimate else f"{left} to go"
+
+
+def _catch_sentence(row: Dict[str, Any], lead: bool, pack: bool,
+                    laps_to_go: float, estimate: bool, digits: int) -> str:
+    """One car's projection in words: in full as the headline, short after it."""
+    who, verdict = row["_who"], row["verdict"]
+    if verdict == "in_pits":
+        return f"{who}'s in the pits."
+    if verdict == "no_gap":
+        return f"No gap to {who}."
+    if verdict == "no_pace":
+        return f"No lap count on {who} yet."
+    gap = _spoken_gap(row["gap_seconds"])
+    rate = (_spoken_delta(row["closing_per_lap"], digits)
+            if row.get("closing_per_lap") is not None else "")
+    if row["they_are_behind"]:
+        if verdict == "already_there":
+            return f"{who} is right on you, {gap} back."
+        if verdict == "catches":
+            if not lead:
+                return f"{who} in {_about_laps(row['laps_to_catch'])}."
+            return (f"{who} catches you in {_about_laps(row['laps_to_catch'])}, "
+                    f"{_to_go(laps_to_go, estimate)}.")
+        if verdict == "close":
+            if not lead:
+                return f"{who} would be right on you at the flag."
+            return f"{who}'s taking {rate} a lap, {gap} back — it'll be right at the flag."
+        if verdict == "holds":
+            if not lead:
+                return f"{who} runs out of laps."
+            return (f"{who}'s taking {rate} a lap but runs out of laps — "
+                    f"{_spoken_gap(row['gap_at_flag'])} short at the flag.")
+        if pack:
+            return f"Nobody behind is catching you — {who} is {gap} back."
+        return f"{who} isn't catching you — {gap} back."
+    if verdict == "already_there":
+        return f"You're right on {who}, {gap} ahead."
+    if verdict == "catches":
+        return (f"You catch {who} in {_about_laps(row['laps_to_catch'])}, "
+                f"{_to_go(laps_to_go, estimate)}.")
+    if verdict == "close":
+        return (f"You're taking {rate} a lap out of {who}, {gap} ahead — "
+                "it'll be right at the flag.")
+    if verdict == "holds":
+        return (f"You're taking {rate} a lap out of {who} but run out of laps — "
+                f"{_spoken_gap(row['gap_at_flag'])} short at the flag.")
+    return f"You're not catching {who} — {gap} ahead."
+
+
+# Most urgent first: who is on the driver now, then who arrives soonest.
+_CATCH_ORDER = {"already_there": 0, "catches": 1, "close": 2, "holds": 3,
+                "not_closing": 4}
+
+
+def _catch_fallback(car: CarTelemetry, track: TrackConfig,
+                    direction: Optional[str], reason: str,
+                    clause: str = "") -> Dict[str, Any]:
+    """The live trend when there is no lap count to give, or the reason.
+
+    Something true about the gap now is still an answer to "is he catching
+    me?" — but only for the car beside the driver, which is the only car the
+    trend measures.
+    """
+    if direction is None:
+        return _no(reason)
+    trend = adjacent_gap_trend(car, track, direction)
+    if not trend["available"] or not clause:
+        return trend
+    return dict(trend, spoken=_radio(trend["spoken"], {"why": clause}, ("why",)),
+                fallback="adjacent_gap_trend", projection_unavailable=reason)
+
+
+def catch_projection(car: CarTelemetry, track: TrackConfig,
+                     target: str = "behind") -> Dict[str, Any]:
+    """Who catches whom before the flag, at the pace each car is doing now.
+
+    Answers "will he catch me", "when", and "can I hold on to the end" —
+    the damaged car deciding whether to stay out, the faster car recovering
+    from a spin. Pace is each car's last three clean laps, never best laps:
+    a car's best was set before its damage or its spin, and either way it
+    says nothing about the pace it is doing now.
+
+    "Catch" means the gap closes to nothing — on the gearbox — not a pass.
+    Whether a quicker car then gets by is racing, and nothing here predicts
+    it. Rates are measured over laps already run and assume they hold.
+    """
+    query = str(target or "").strip().lower()
+    if not query or query in _BEHIND_WORDS or query in (
+            "pack", "the pack", "anyone", "anyone behind", "anybody", "everyone behind"):
+        mode = "pack"
+    elif query in _AHEAD_WORDS:
+        mode = "ahead"
+    else:
+        mode = "named"
+    adjacent = {"pack": "behind", "ahead": "ahead"}.get(mode)
+
+    if getattr(track, "finished", False):
+        return _no("The flag's out — the places are settled.")
+    if not _is_race(track) or _race_not_started(track):
+        # Outside a race the car behind is traffic, and the live trend
+        # already says it the way practice needs.
+        return _catch_fallback(car, track, adjacent,
+                               "There's no finish to race to in this session.")
+    if car.flag in _NEUTRALISED:
+        return _no("We're under caution — the gaps mean nothing until the restart.")
+    if car.on_pit_road:
+        return _no("Get back out first — the gaps all change through the stop.")
+    if not track.field:
+        return _catch_fallback(car, track, adjacent,
+                               "I haven't got the order in front of me.")
+    me = _me(track)
+    if me is None:
+        return _no("I can't place you in the order right now.")
+    laps_to_go = _laps_to_go(car, track)
+    if laps_to_go is None:
+        return _catch_fallback(car, track, adjacent,
+                               "I can't tell how many laps are left.",
+                               "Can't tell the laps left for a lap count.")
+    # Estimated only when it came from the clock: `_laps_to_go` reads a lap
+    # count as given and divides the time left by a lap time otherwise.
+    estimate = (bool(car.laps_to_go_is_estimate) if car.laps_to_go is not None
+                else track.laps_remaining is None)
+    my_pace = _recent_pace(_race_laps(track))
+    if my_pace is None:
+        return _catch_fallback(
+            car, track, adjacent,
+            "I need three clean laps from you before I can put a lap count on it.",
+            "No lap count until you've three clean laps.")
+
+    if mode == "pack":
+        behind = sorted((r for r in track.field
+                         if not r.is_player and r.position and me.position
+                         and r.position > me.position),
+                        key=lambda r: r.position)
+        if not behind:
+            return _yes("There's nobody behind you.", direction="behind",
+                        cars=[], laps_to_go=round(laps_to_go, 1))
+        racing = [r for r in behind if r.laps_down == 0
+                  and _class_context(track, r)["same_class_as_you"] is not False]
+        if not racing:
+            return _yes("Nobody behind is racing you for the place.",
+                        direction="behind", cars=[],
+                        laps_to_go=round(laps_to_go, 1))
+        targets = racing[:_PACK]
+        context: Dict[str, Any] = {}
+    else:
+        them = _resolve_target(car, track, query if mode == "ahead" else target)
+        if them is None:
+            if mode == "ahead":
+                return _no("I haven't got a car ahead right now.")
+            return _no(f"I can't find {target} out there.")
+        if them.is_player:
+            return _no("That's you.")
+        who = _radio_rival_name(them, track)
+        if them.laps_down != 0:
+            word = "ahead of" if them.laps_down < 0 else "behind"
+            return _yes(f"{who} is {_plural(abs(them.laps_down), 'lap')} {word} "
+                        "you — the time gap doesn't mean anything across laps.",
+                        driver=them.name, car_number=them.car_number,
+                        position=them.position, laps_apart=them.laps_down,
+                        cars=[])
+        targets = [them]
+        context = _class_context(track, them)
+
+    digits = lap_digits(track)
+    rows = [_catch_one(car, track, me, r, my_pace, laps_to_go, estimate)
+            for r in targets]
+    rated = sorted((r for r in rows if r["verdict"] in _CATCH_ORDER),
+                   key=lambda r: (_CATCH_ORDER[r["verdict"]],
+                                  r.get("laps_to_catch") or 0.0,
+                                  r.get("gap_seconds") or 0.0))
+    notes = [r for r in rows if r["verdict"] not in _CATCH_ORDER]
+    if not rated:
+        if len(rows) == 1 and rows[0]["verdict"] == "in_pits":
+            return _yes(_catch_sentence(rows[0], True, False, laps_to_go,
+                                        estimate, digits),
+                        cars=[{k: v for k, v in rows[0].items() if k != "_who"}])
+        who = rows[0]["_who"] if len(rows) == 1 else "them"
+        return _catch_fallback(
+            car, track, adjacent,
+            f"I haven't got enough clean laps on {who} for a lap count yet.",
+            f"Not enough clean laps on {who} for a lap count yet.")
+
+    pack = mode == "pack"
+    headline = _catch_sentence(rated[0], True, pack, laps_to_go, estimate, digits)
+    clauses: Dict[str, str] = {}
+    for n, row in enumerate(rated[1:], start=2):
+        # Behind a headline that is already the worst news, only the cars
+        # that will also get there are worth the radio.
+        if row["verdict"] in ("already_there", "catches", "close"):
+            clauses[f"car{n}"] = _catch_sentence(row, False, pack, laps_to_go,
+                                                 estimate, digits)
+    if _is_race(track) and context.get("traffic_description"):
+        clauses["traffic"] = (f"That's {context['traffic_description']}, "
+                              "not a battle for the place.")
+    for n, row in enumerate(notes, start=1):
+        clauses[f"note{n}"] = _catch_sentence(row, False, pack, laps_to_go,
+                                              estimate, digits)
+    # Measured repair time, for the driver deciding whether to stay out. The
+    # other half of that decision — what a stop costs — is not published,
+    # so nothing here weighs one against the other.
+    if car.repair_required:
+        clauses["repair"] = (f"Required repairs are "
+                             f"{_plural(car.repair_required, 'second')}.")
+    elif car.repair_optional:
+        clauses["repair"] = (f"Optional repairs would be "
+                             f"{_plural(car.repair_optional, 'second')}.")
+
+    return _yes(
+        _radio(headline, clauses, tuple(clauses)),
+        headline=headline,
+        clauses=clauses,
+        direction=("ahead" if mode == "ahead" else "behind" if pack
+                   else ("behind" if rated[0]["they_are_behind"] else "ahead")),
+        cars=[{k: v for k, v in r.items() if k != "_who"} for r in rows],
+        your_pace=round(my_pace, 3),
+        laps_to_go=round(laps_to_go, 1),
+        laps_to_go_is_estimate=estimate,
+        repair_required=car.repair_required,
+        repair_optional=car.repair_optional,
+        basis=("mean of each car's last 3 clean laps, caution laps excluded; "
+               "catch means the gap closed to zero, not a pass; assumes the "
+               "pace holds"),
+        **context,
+    )
+
+
 def standings(car: CarTelemetry, track: TrackConfig,
               top: Optional[int] = None, around_me: Optional[int] = None) -> Dict[str, Any]:
     """A slice of the running order — the top N, or the cars either side of you."""
@@ -1671,11 +2123,13 @@ def fastest_lap(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
 
 
 def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]:
-    """Are we catching them, and how long until we're on their gearbox?
+    """How the two cars compare on best-lap potential.
 
-    Uses best-lap pace, which is what the SDK publishes per car — there is
-    no per-rival rolling average, so this is a comparison of potential, not
-    of the last three laps. Said plainly rather than dressed up.
+    Best laps only, and said as such. It used to go on to "they are on you
+    in about N laps", which is wrong exactly when it matters: a damaged
+    driver's best was set before the damage, and a car recovering from a
+    spin keeps its best. Who catches whom, and when, is `catch_projection`,
+    from the laps each car is doing now.
     """
     if not track.field:
         return _no("I haven't got the order in front of me.")
@@ -1695,34 +2149,14 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
     gap_seconds = gap.get("gap_seconds") if gap.get("available") else None
 
     ahead = gap.get("ahead")
-    # "laps to contact" only means something when the quicker car is behind
-    # the slower one. A faster car already ahead is simply escaping, and a
-    # slower car behind is simply dropping away — quoting a lap count there
-    # invites the model to narrate a catch that will never happen.
-    closing = (per_lap > 0 and ahead is True) or (per_lap < 0 and ahead is False)
-    laps_to_contact = None
-    if closing and gap_seconds:
-        laps_to_contact = gap_seconds / abs(per_lap)
 
     margin = _spoken_delta(per_lap, lap_digits(track))
     if abs(per_lap) < 0.02:
-        spoken = f"You and {_radio_rival_name(them, track)} are matched on pace, within a couple of hundredths."
+        spoken = f"You and {_radio_rival_name(them, track)} are matched on best laps, within a couple of hundredths."
     elif per_lap > 0:
-        spoken = f"You are {margin} a lap quicker than {_radio_rival_name(them, track)}"
-        if laps_to_contact:
-            spoken += f" — about {_plural(laps_to_contact, 'lap')} to catch them."
-        elif ahead is False:
-            spoken += ", and they are behind you, so the gap grows."
-        else:
-            spoken += "."
+        spoken = f"You are {margin} a lap quicker than {_radio_rival_name(them, track)} on best laps."
     else:
-        spoken = f"{_radio_rival_name(them, track)} is {margin} a lap quicker than you"
-        if laps_to_contact:
-            spoken += f" — they are on you in about {_plural(laps_to_contact, 'lap')}."
-        elif ahead is True:
-            spoken += ", and they are ahead, so they are pulling away."
-        else:
-            spoken += "."
+        spoken = f"{_radio_rival_name(them, track)} is {margin} a lap quicker than you on best laps."
 
     if _is_race(track) and context["traffic_description"]:
         spoken += (f" That's {context['traffic_description']}, not a battle for "
@@ -1735,9 +2169,8 @@ def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str
         pace_delta_per_lap=round(per_lap, 3),
         gap_seconds=gap_seconds,
         they_are_ahead=ahead,
-        closing=closing,
-        laps_to_contact=None if laps_to_contact is None else round(laps_to_contact, 1),
-        basis="best lap of the session for each car",
+        basis="best lap of the session for each car; says nothing about "
+              "current pace or who catches whom",
         **context,
     )
 
@@ -2069,12 +2502,7 @@ def _race_laps(track: TrackConfig) -> List[Any]:
     before the tag existed carry None and are kept, since dropping them
     would silently shorten the race.
     """
-    history = list(getattr(track, "laps", []) or [])
-    current = getattr(track, "session_num", None)
-    if current is None:
-        return history
-    return [l for l in history
-            if getattr(l, "session_num", None) in (current, None)]
+    return _this_segment(getattr(track, "laps", []) or [], track)
 
 
 def race_history(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
@@ -2312,9 +2740,9 @@ _TOOLS: List[Dict[str, Any]] = [
         "name": "adjacent_gap_trend",
         "description": (
             "The live, telemetry-measured closing or opening trend to the physical "
-            "car immediately ahead or behind. Use for 'am I gaining/catching', "
-            "'is the gap closing', and 'is the car behind catching me'. This is the "
-            "only calculator for current relative movement; do not substitute best laps."
+            "car immediately ahead or behind, over the last few mini-sectors. Use "
+            "for 'am I gaining' and 'is the gap closing' right now. For whether or "
+            "when a car catches you, or you catch one, use catch_projection."
         ),
         "parameters": {
             "type": "object",
@@ -2328,6 +2756,33 @@ _TOOLS: List[Dict[str, Any]] = [
             "required": ["direction"],
         },
         "fn": adjacent_gap_trend,
+    },
+    {
+        "name": "catch_projection",
+        "description": (
+            "Whether and when a car catches the driver, or the driver catches "
+            "one, before the flag, from the pace each car has done over its last "
+            "three clean laps. Use for 'will he catch me', 'when will the car "
+            "behind catch me', 'is anyone going to catch me', 'is he catching "
+            "me', 'can I catch Rossi', 'can I hold position to the end', 'will "
+            "I lose a place', and for a damaged car deciding whether it can stay "
+            "out. With no target it looks at the cars racing the driver from "
+            "behind. Never work out a lap count to contact yourself."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": (
+                        "\"behind\" (default: the cars racing you from behind), "
+                        "\"ahead\", or one car: a driver name, car number "
+                        "(\"#44\"), position (\"P3\") or \"leader\"."
+                    ),
+                }
+            },
+        },
+        "fn": catch_projection,
     },
     {
         "name": "standings",
@@ -2350,9 +2805,9 @@ _TOOLS: List[Dict[str, Any]] = [
     {
         "name": "pace_compare",
         "description": (
-            "Compare best-lap potential with another named car and estimate how many "
-            "laps until they catch, or are caught. This is not the live gap trend; "
-            "use adjacent_gap_trend for the physical car ahead or behind."
+            "Compare best-lap potential with another named car. It says nothing "
+            "about current pace or who catches whom: for that use catch_projection, "
+            "and for the live gap movement use adjacent_gap_trend."
         ),
         "parameters": {
             "type": "object",

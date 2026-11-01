@@ -14,8 +14,9 @@ import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
-from . import (CarTelemetry, LapRecord, Rival, TelemetryAdapter,
-               TelemetrySnapshot, TrackConfig, TyreState, session_kind)
+from . import (OFF_THE_MEDIAN, CarTelemetry, LapRecord, Rival,
+               TelemetryAdapter, TelemetrySnapshot, TrackConfig, TyreState,
+               session_kind)
 from ..pit_commands import PitCommand, PitTireCompound
 
 logger = logging.getLogger("race-engineer")
@@ -298,6 +299,40 @@ def _decode_flag(value: Optional[int]) -> str:
     return "Green"
 
 
+def _caution_out(value: Any) -> bool:
+    """Whether SessionFlags shows a full-course caution, waving or not.
+
+    Read straight from the bits rather than from _decode_flag(), which
+    reports only the most severe flag — a black flag shown during a caution
+    would hide the caution.
+    """
+    try:
+        bits = int(value or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(bits & (_flag_value("caution", 0x00004000)
+                        | _flag_value("caution_waving", 0x00008000)))
+
+
+def _mark_off_median(laps: List[LapRecord]) -> List[LapRecord]:
+    """Mark clean laps well off the median of the clean ones as unclean.
+
+    A lap can be slow without touching the pit lane or the grass —
+    traffic, a lift for a yellow, a missed shift. One rule for the driver's
+    laps and every rival's, so the two sides of a pace comparison are
+    judged alike.
+    """
+    times = sorted(l.time for l in laps if l.clean)
+    if len(times) >= 5:
+        median = times[len(times) // 2]
+        # 107% is the usual yardstick for a representative lap.
+        limit = median * 1.07
+        for lap in laps:
+            if lap.clean and lap.time > limit:
+                lap.clean, lap.note = False, OFF_THE_MEDIAN
+    return laps
+
+
 def _gear_label(gear: Optional[int]) -> str:
     if gear is None:
         return ""
@@ -537,6 +572,11 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._grid_latched_class: Optional[int] = None
         self._lap_dirty: bool = False
         self._lap_dirty_reason: str = ""
+        self._lap_caution: bool = False
+        # Every other car's recent laps, per car index, for the catch
+        # projection. See _update_rival_laps().
+        self._rival_laps: Dict[int, Deque[LapRecord]] = {}
+        self._rival_lap_state: Dict[int, Dict[str, Any]] = {}
         # Verdict on the lap most recently completed, read by the fuel average.
         self._last_lap_clean: bool = True
         # iRacing restricts live tyre telemetry to in-car dashboards: for
@@ -970,6 +1010,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._grid_latched_class = None
         self._lap_dirty = False
         self._lap_dirty_reason = ""
+        self._lap_caution = False
+        getattr(self, "_rival_laps", {}).clear()
+        getattr(self, "_rival_lap_state", {}).clear()
         self._last_lap_clean = True
         self._fuel_marker = None
         self._fuel_minimum = None
@@ -1064,6 +1107,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # moves underneath it.
         self._update_sectors()
         self._update_laps()
+        self._update_rival_laps()
         self._update_fuel_usage()
         ahead, behind = self._rivals()
         standings, field_size, fastest = self._standings()
@@ -1956,6 +2000,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
             self._lap_dirty, self._lap_dirty_reason = True, "off track"
         if _positive(self._get("PlayerCarTowTime")):
             self._lap_dirty, self._lap_dirty_reason = True, "towed"
+        if _caution_out(self._get("SessionFlags")):
+            self._lap_caution = True
 
         if self._lap_marker is None:
             self._lap_marker = completed
@@ -1967,7 +2013,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._lap_marker = completed
         lap_time = _positive(self._get("LapLastLapTime"))
         dirty, reason = self._lap_dirty, self._lap_dirty_reason
+        caution = getattr(self, "_lap_caution", False)
         self._lap_dirty, self._lap_dirty_reason = False, ""
+        self._lap_caution = False
         self._last_lap_clean = not dirty
         if lap_time is None:
             return
@@ -1980,6 +2028,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
             clean=not dirty,
             note=reason,
             session_num=session_num,
+            caution=caution,
         ))
 
     def _lap_history(self) -> List[LapRecord]:
@@ -1990,16 +2039,93 @@ class iRacingTelemetryReader(TelemetryAdapter):
         median of the clean laps is excluded from trend work too, because a
         single bad lap otherwise reads as a cliff in tyre performance.
         """
-        laps = list(self._laps)
-        times = sorted(l.time for l in laps if l.clean)
-        if len(times) >= 5:
-            median = times[len(times) // 2]
-            # 107% is the usual yardstick for a representative lap.
-            limit = median * 1.07
-            for lap in laps:
-                if lap.clean and lap.time > limit:
-                    lap.clean, lap.note = False, "well off the median"
-        return laps
+        return _mark_off_median(list(self._laps))
+
+    def _update_rival_laps(self) -> None:
+        """Record every other car's completed laps, flagging the untrusted.
+
+        The catch projection needs each rival's recent pace, and the SDK
+        publishes only the lap each car has just finished. Collected here and
+        judged like the driver's own: a lap with pit road, an off or a
+        caution in it is kept but marked, so a car that spun is measured on
+        the laps since, not on the spin.
+
+        Paired without assuming an order. Whether CarIdxLastLapTime moves on
+        the same tick as CarIdxLapCompleted, before it or after it is not
+        documented — CrewChief reads opponent lap times from the session
+        results instead — so a lap is recorded once both have happened. The
+        count's increment closes the verdict on the lap; the time changing
+        supplies the time. Whichever arrives first waits for the other, and
+        is replaced by the next lap's if the other never comes. Pairing on
+        the first value seen instead would record the previous lap's time
+        under the new lap's verdict.
+        """
+        if not hasattr(self, "_rival_laps"):
+            self._rival_laps, self._rival_lap_state = {}, {}
+        completed_laps = self._get("CarIdxLapCompleted") or []
+        last_times = self._get("CarIdxLastLapTime") or []
+        pits = self._get("CarIdxOnPitRoad") or []
+        surfaces = self._get("CarIdxTrackSurface") or []
+        caution = _caution_out(self._get("SessionFlags"))
+        surface_names = _enum_map("TrkLoc", {
+            -1: "not in world", 0: "off track", 1: "in pit stall",
+            2: "aproaching pits", 3: "on track"})
+        drivers = self._drivers()
+        my_idx = self._get("PlayerCarIdx", -1)
+        session_num = _int_or(self._get("SessionNum"), None)
+
+        for idx, info in drivers.items():
+            if idx == my_idx:
+                continue
+            completed = _int_or(_at(completed_laps, idx), None)
+            lap_time = _positive(_at(last_times, idx))
+            who = f"{info.get('car_number', '')}|{info.get('name', '')}"
+            state = self._rival_lap_state.get(idx)
+            # A car index handed to another driver, or a new segment, starts
+            # again: one car's laps must never describe another's pace.
+            if state is None or state["who"] != who \
+                    or state["session"] != session_num:
+                self._rival_laps.pop(idx, None)
+                self._rival_lap_state[idx] = {
+                    "who": who, "session": session_num, "marker": completed,
+                    "time": lap_time, "dirty": "", "caution": False,
+                    "verdict": None, "unpaired": None}
+                continue
+
+            surface = surface_names.get(_at(surfaces, idx), "")
+            if bool(_at(pits, idx, False)) or surface in (
+                    "in pit stall", "aproaching pits", "approaching pits"):
+                state["dirty"] = state["dirty"] or "pit lane"
+            elif surface in ("off track", "not in world"):
+                state["dirty"] = state["dirty"] or surface
+            if caution:
+                state["caution"] = True
+
+            if completed is not None:
+                if state["marker"] is None or completed < state["marker"]:
+                    state["marker"] = completed
+                elif completed > state["marker"]:
+                    state["marker"] = completed
+                    state["verdict"] = (completed, state["dirty"], state["caution"])
+                    state["dirty"], state["caution"] = "", False
+                    if state["unpaired"] is not None:
+                        self._record_rival_lap(idx, state, state["unpaired"])
+                        state["unpaired"] = None
+
+            if lap_time is not None and lap_time != state["time"]:
+                state["time"] = lap_time
+                if state["verdict"] is not None:
+                    self._record_rival_lap(idx, state, lap_time)
+                else:
+                    state["unpaired"] = lap_time
+
+    def _record_rival_lap(self, idx: int, state: Dict[str, Any],
+                          lap_time: float) -> None:
+        lap, dirty, caution = state["verdict"]
+        state["verdict"] = None
+        self._rival_laps.setdefault(idx, deque(maxlen=8)).append(LapRecord(
+            lap=lap, time=round(lap_time, 3), clean=not dirty, note=dirty,
+            caution=caution, session_num=state["session"]))
 
     def _update_fuel_usage(self) -> None:
         """Measure fuel burnt per lap by watching the tank across lap crossings.
@@ -2518,6 +2644,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 best_lap=_positive(at(best)),
                 last_lap=_positive(at(last)),
                 tyre_compound=_count(at(compound)),
+                recent_laps=_mark_off_median(
+                    list(getattr(self, "_rival_laps", {}).get(idx, []))),
                 sector_times=list(self._sector_times.get(idx, [])),
                 in_pits=bool(at(pits, False)),
                 track_surface=surface_names.get(at(surfaces), "") or "",

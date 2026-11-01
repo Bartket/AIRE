@@ -395,13 +395,21 @@ def test_position_report_uses_the_grid_before_green_not_physical_order():
     assert "P16" not in result["spoken"]
 
 
-def test_a_faster_car_ahead_is_not_reported_as_catchable():
-    """laps_to_contact means nothing when the quicker car is already ahead —
-    the model narrated a catch that could never happen."""
+def test_best_laps_never_predict_who_catches_whom():
+    """pace_compare said "they are on you in about N laps" from best laps.
+
+    That is wrong exactly when it matters: a damaged driver's best was set
+    before the damage, and a car recovering from a spin keeps its best — so
+    it called a car that was closing "dropping away". Who catches whom is
+    catch_projection's, from the laps each car is doing now.
+    """
     track = TrackConfig(session_type="Race", field=_field(), field_size=5)
-    result = rm.pace_compare(_car(), track, "P2")
-    assert result["closing"] is False
-    assert result["laps_to_contact"] is None
+    for target in ("P2", "Novak"):
+        result = rm.pace_compare(_car(), track, target)
+        assert "laps_to_contact" not in result and "closing" not in result
+        assert "on best laps" in result["spoken"]
+        for claim in ("catch", "on you", "gap grows", "pulling away"):
+            assert claim not in result["spoken"], result["spoken"]
 
 
 # ── Spoken numbers ──────────────────────────────────────────────────
@@ -3065,6 +3073,28 @@ def _budget_scenarios():
         ("practice", CarTelemetry(**short, position=4),
          TrackConfig(session_type="Practice", time_remaining=1800.0,
                      current_lap=8, field=_field())),
+        # Every catch clause at once: three cars arriving, one more in the
+        # pits, repairs to report and a lap count that is an estimate.
+        ("chased, damaged, timed",
+         CarTelemetry(**short, position=2, repair_required=42.0,
+                      laps_to_go_is_estimate=True),
+         TrackConfig(session_type="Race", laps_remaining=None,
+                     time_remaining=1300.0, current_lap=20,
+                     laps=[LapRecord(lap=n, time=93.0) for n in range(1, 4)],
+                     field=[
+                         Rival(name="Becker", position=1, best_lap=90.5,
+                               recent_laps=[LapRecord(lap=n, time=92.0)
+                                            for n in range(1, 4)]),
+                         Rival(name="You", position=2, gap=2.0, is_player=True),
+                         *[Rival(name=name, position=p, gap=2.0 + back,
+                                 in_pits=pits,
+                                 recent_laps=[LapRecord(lap=n, time=pace)
+                                              for n in range(1, 4)])
+                           for name, p, back, pace, pits in (
+                               ("Novak", 3, 1.5, 92.6, True),
+                               ("Kowalski-Wisniewski", 4, 2.5, 92.4, False),
+                               ("Silva", 5, 3.5, 92.5, False),
+                               ("Dubois", 6, 4.0, 92.3, False))]])),
     ]
 
 
@@ -3075,6 +3105,9 @@ def _budget_arguments(name):
     if name == "car_resources":
         return [{"topic": topic} for topic in
                 ("pits", "tyres", "push to pass", "joker", "pit service")]
+    if name == "catch_projection":
+        return [{"target": target} for target in
+                ("behind", "ahead", "Silva", "Novak")]
     return [{}]
 
 
@@ -3384,3 +3417,310 @@ def test_a_clean_flag_says_there_is_no_penalty():
     assert rm.race_control_report(_car(flag="Black", penalty="slow-down penalty"),
                                   TrackConfig(session_type="Race"))["spoken"] \
         == "Slow-down penalty."
+
+
+# ── Being caught, and catching ──────────────────────────────────────
+
+import pytest  # noqa: E402 — used by the phrasing table below only
+
+from ai_race_engineer.telemetry import OFF_THE_MEDIAN  # noqa: E402
+
+
+def _clean(times, start=1, **kw):
+    return [LapRecord(lap=start + i, time=t, **kw) for i, t in enumerate(times)]
+
+
+def _chaser(name, position, back, laps, **kw):
+    """A car `back` seconds behind the driver, who is P2 and 2.0 s off the lead."""
+    kw.setdefault("best_lap", 91.6)
+    return Rival(name=name, car_number=str(30 + position), position=position,
+                 gap=2.0 + back, recent_laps=_clean(laps), **kw)
+
+
+def _chase(*chasers, my_laps=(91.5, 91.5, 91.5), laps_to_go=10,
+           leader_laps=(90.9, 90.9, 90.9), track_kw=None, **car_kw):
+    field = [Rival(name="Becker", car_number="19", position=1, best_lap=90.5,
+                   recent_laps=_clean(leader_laps)),
+             Rival(name="You", car_number="44", position=2, gap=2.0,
+                   best_lap=91.2, is_player=True),
+             *chasers]
+    laps = (list(my_laps) if my_laps and isinstance(my_laps[0], LapRecord)
+            else _clean(my_laps))
+    track = TrackConfig(session_type="Race", laps_remaining=laps_to_go,
+                        current_lap=20, field=field, laps=laps,
+                        **(track_kw or {}))
+    car_kw.setdefault("flag", "Green")
+    return _car(position=2, laps_to_go=laps_to_go, **car_kw), track
+
+
+def test_a_car_recovering_from_a_spin_is_projected_from_its_pace_now():
+    """The first case the driver asked for. Novak spun and is lapping half a
+    second quicker — but his best lap is slower than the driver's, so
+    anything built on best laps said he was dropping away."""
+    novak = _chaser("Novak", 3, 3.0, [91.0, 99.0, 91.0, 91.0], best_lap=92.5)
+    novak.recent_laps[1].clean, novak.recent_laps[1].note = False, "off track"
+    car, track = _chase(novak)
+
+    for target in ("behind", "Novak"):
+        result = rm.catch_projection(car, track, target)
+        row = result["cars"][0]
+        assert row["verdict"] == "catches", (target, result["spoken"])
+        assert row["laps_to_catch"] == 6.0
+        assert result["spoken"].startswith(
+            "Novak catches you in about 6 laps, 10 to go."), result["spoken"]
+
+
+def test_a_damaged_car_that_will_hold_on_is_told_so_with_the_margin():
+    """The second case: damage, and the cars behind closing slowly.
+
+    The damage costs 8% — past the 107% outlier rule — so every lap since is
+    marked off the median. Discarded, the driver's pace came from before the
+    damage and the answer was that nobody is catching at all.
+    """
+    before = _clean([90.0] * 5)
+    after = _clean([97.0, 97.2, 97.1], start=6, clean=False, note=OFF_THE_MEDIAN)
+    car, track = _chase(_chaser("Novak", 3, 4.0, [96.9] * 3),
+                        _chaser("Silva", 4, 7.0, [96.95] * 3),
+                        my_laps=before + after, repair_optional=35.0)
+    result = rm.catch_projection(car, track)
+
+    assert [row["verdict"] for row in result["cars"]] == ["holds", "holds"]
+    assert result["cars"][0]["gap_at_flag"] == 2.0
+    assert result["spoken"].startswith(
+        "Novak's taking 2 tenths of a second a lap but runs out of laps — "
+        "2 seconds short at the flag."), result["spoken"]
+    assert "Optional repairs would be 35 seconds." in result["spoken"]
+    assert len(result["spoken"].split()) <= rm.SPOKEN_BUDGET_WORDS
+
+
+def test_a_one_off_slow_lap_is_still_not_the_drivers_pace():
+    """The step rule is for a new pace, not a bad lap: one lap off the median
+    among clean ones leaves the clean laps as the pace."""
+    laps = _clean([91.5, 91.5]) + _clean([99.0], start=3, clean=False,
+                                         note=OFF_THE_MEDIAN) + _clean([91.5], start=4)
+    assert rm._recent_pace(laps) == 91.5
+
+
+def test_a_catch_right_at_the_flag_is_called_close_not_a_lap_count():
+    car, track = _chase(_chaser("Novak", 3, 3.0, [91.2] * 3))
+    result = rm.catch_projection(car, track)
+    assert result["cars"][0]["verdict"] == "close"
+    assert "right at the flag" in result["spoken"]
+
+
+def test_on_the_last_lap_nobody_catches_who_cannot_close_the_gap_in_it():
+    car, track = _chase(_chaser("Novak", 3, 1.0, [91.0] * 3), laps_to_go=0.6)
+    result = rm.catch_projection(car, track)
+    assert result["cars"][0]["verdict"] == "holds"
+    assert "7 tenths short at the flag" in result["spoken"]
+
+    car, track = _chase(_chaser("Novak", 3, 0.8, [91.0] * 3), laps_to_go=0.6)
+    assert rm.catch_projection(car, track)["cars"][0]["verdict"] == "close"
+
+
+def test_a_car_already_on_the_gearbox_is_not_a_projection():
+    car, track = _chase(_chaser("Novak", 3, 0.3, [91.0] * 3))
+    result = rm.catch_projection(car, track)
+    assert result["cars"][0]["verdict"] == "already_there"
+    assert result["spoken"].startswith("Novak is right on you")
+
+
+def test_the_soonest_catch_leads_and_the_next_follows():
+    car, track = _chase(_chaser("Novak", 3, 2.0, [91.0] * 3),
+                        _chaser("Silva", 4, 3.0, [90.5] * 3))
+    result = rm.catch_projection(car, track)
+    assert result["spoken"] == ("Silva catches you in about 3 laps, 10 to go. "
+                                "Novak in about 4 laps.")
+
+
+def test_nobody_closing_is_said_with_the_nearest_gap():
+    car, track = _chase(_chaser("Novak", 3, 3.0, [92.0] * 3))
+    assert rm.catch_projection(car, track)["spoken"] == (
+        "Nobody behind is catching you — Novak is 3 seconds back.")
+
+
+def test_catching_the_car_ahead_is_the_same_sum_the_other_way():
+    car, track = _chase(_chaser("Novak", 3, 3.0, [92.0] * 3),
+                        leader_laps=(91.8, 91.8, 91.8))
+    result = rm.catch_projection(car, track, "ahead")
+    assert result["spoken"] == "You catch Becker in about 6 laps, 10 to go."
+
+
+def test_caution_laps_are_not_pace_and_a_caution_is_not_a_gap():
+    """Behind the safety car the laps are slow for everyone and the gaps are
+    whatever the pack happens to be — neither says who is quicker."""
+    novak = _chaser("Novak", 3, 3.0, [91.0] * 3)
+    # Behind the safety car both run the same laps, so counted, the half a
+    # second Novak has on the driver disappears.
+    novak.recent_laps += _clean([121.0] * 3, start=4, caution=True)
+    mine = _clean([91.5] * 3) + _clean([121.0] * 3, start=4, caution=True)
+    car, track = _chase(novak, my_laps=mine)
+    assert rm.catch_projection(car, track)["cars"][0]["verdict"] == "catches"
+
+    car, track = _chase(novak, my_laps=mine, flag="Caution")
+    result = rm.catch_projection(car, track)
+    assert not result["available"]
+    assert "caution" in result["spoken"]
+
+
+def test_a_rival_in_the_pits_is_skipped_and_said():
+    car, track = _chase(_chaser("Novak", 3, 3.0, [91.0] * 3, in_pits=True),
+                        _chaser("Silva", 4, 5.0, [90.5] * 3))
+    result = rm.catch_projection(car, track)
+    assert result["spoken"].startswith("Silva catches you")
+    assert "Novak's in the pits." in result["clauses"].values()
+
+
+def test_lapped_and_other_class_cars_are_not_racing_you_for_the_place():
+    car, track = _chase(
+        _chaser("Novak", 3, 3.0, [85.0] * 3, laps_down=1, car_class_id=1),
+        _chaser("Silva", 4, 4.0, [80.0] * 3, car_class_id=2),
+        track_kw={"car_class_id": 1})
+    assert rm.catch_projection(car, track)["spoken"] == (
+        "Nobody behind is racing you for the place.")
+
+
+def test_a_named_faster_class_car_is_projected_as_traffic():
+    silva = _chaser("Silva", 4, 4.0, [88.0] * 3, car_class_id=2,
+                    class_est_lap_time=85.0)
+    car, track = _chase(silva, track_kw={"car_class_id": 1,
+                                         "car_class_est_lap_time": 91.0})
+    result = rm.catch_projection(car, track, "Silva")
+    assert result["spoken"].startswith("Silva catches you in about a lap")
+    assert "faster-class traffic, not a battle for the place" in result["spoken"]
+
+
+def test_a_car_with_too_few_laps_is_named_not_estimated():
+    car, track = _chase(_chaser("Novak", 3, 3.0, [91.0] * 3),
+                        _chaser("Silva", 4, 5.0, [90.0, 90.1]))
+    result = rm.catch_projection(car, track)
+    silva = result["cars"][1]
+    assert silva["verdict"] == "no_pace" and "laps_to_catch" not in silva
+    assert "No lap count on Silva yet." in result["clauses"].values()
+
+
+def test_without_a_lap_count_the_answer_is_the_live_trend():
+    """"Is he catching me?" early in a stint still deserves what is true now,
+    and practice keeps the traffic wording it already had."""
+    trend = dict(behind=Rival(name="Novak", car_number="33", position=3, gap=1.8),
+                 closing_behind_status="confirmed", closing_behind_change=0.3,
+                 closing_behind_segments=3)
+    car, track = _chase(_chaser("Novak", 3, 1.8, [91.0] * 3), my_laps=(), **trend)
+    result = rm.catch_projection(car, track)
+    live = rm.adjacent_gap_trend(car, track, "behind")["spoken"]
+    assert result["spoken"].startswith(live)
+    assert "No lap count until you've three clean laps." in result["spoken"]
+
+    car, track = _chase(_chaser("Novak", 3, 1.8, [91.0] * 3), **trend)
+    track.session_type = "Practice"
+    assert rm.catch_projection(car, track)["spoken"] == \
+        rm.adjacent_gap_trend(car, track, "behind")["spoken"]
+    assert not rm.catch_projection(car, track, "Novak")["available"]
+
+
+def test_after_the_flag_nobody_is_catching_anyone():
+    car, track = _chase(_chaser("Novak", 3, 1.0, [90.0] * 3))
+    track.finished = True
+    assert not rm.catch_projection(car, track)["available"]
+
+
+# Every way of asking, against what should answer it. A row of None goes to
+# the model: either it names a car only the tool call can resolve, or it is
+# not about catching at all.
+@pytest.mark.parametrize("question, expected", [
+    # Will they — the "if" forms.
+    ("Will he catch me?", ("projection", "behind")),
+    ("Is the car behind going to catch me?", ("projection", "behind")),
+    ("Is anyone going to catch me?", ("projection", "behind")),
+    ("Can they catch me before the end?", ("projection", "behind")),
+    ("Am I going to get caught?", ("projection", "behind")),
+    ("Will I lose a place?", ("projection", "behind")),
+    ("Can I hold position to the end?", ("projection", "behind")),
+    ("Can I hold him off?", ("projection", "behind")),
+    ("Can I hold on to the flag?", ("projection", "behind")),
+    ("Are the guys behind going to pass me?", ("projection", "behind")),
+    ("He'll catch me, won't he?", ("projection", "behind")),
+    # Present tense means the same question.
+    ("Is the car behind catching me?", ("projection", "behind")),
+    ("Is he catching me?", ("projection", "behind")),
+    ("Am I catching the car in front?", ("projection", "ahead")),
+    # When.
+    ("When will the car behind catch me?", ("projection", "behind")),
+    ("When is the car behind going to catch me?", ("projection", "behind")),
+    ("How long until he's on me?", ("projection", "behind")),
+    ("How many laps till they're on my gearbox?", ("projection", "behind")),
+    ("When will I catch the car ahead?", ("projection", "ahead")),
+    # The driver doing the catching.
+    ("Can I catch him before the flag?", ("projection", "ahead")),
+    ("Will I catch up?", ("projection", "ahead")),
+    ("Can I catch the guy in front?", ("projection", "ahead")),
+    # Live movement stays on the mini-sector trend.
+    ("Am I gaining on the car ahead?", ("trend", "ahead")),
+    ("Is the gap closing to the car behind?", ("trend", "behind")),
+    ("Is the car behind pulling away?", ("trend", "behind")),
+    # A named car: the tool call names it.
+    ("Will Rossi catch me?", None),
+    ("Can I catch the leader?", None),
+    ("Will 44 catch me?", None),
+    ("Is P6 going to catch me?", None),
+    # Both ways at once is two questions.
+    ("Will I catch the car ahead before the car behind catches me?", None),
+    # Not about catching.
+    ("Did you catch that?", None),
+    ("Was I caught speeding?", None),
+    ("Can I make it to the end?", None),
+    ("When should I pit?", None),
+    ("Hold on, say again", None),
+])
+def test_every_way_of_asking_whether_a_car_catches_you(question, expected):
+    assert rm.catch_intent(question) == expected
+
+
+def test_catch_questions_are_answered_without_the_model():
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    client = LLMClient(AppConfig())
+    client._chat_raw = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("catch answer was left to the model"))
+    car, track = _chase(_chaser("Novak", 3, 3.0, [91.0] * 3))
+    telemetry = TelemetrySnapshot(car, track)
+
+    expected = rm.catch_projection(car, track, "behind")["spoken"]
+    for question in ("Is anyone going to catch me before the end?",
+                     "When is the car behind going to catch me?",
+                     "Can I hold position to the flag?"):
+        assert client.generate(question, telemetry) == expected, question
+    assert client.generate("Can I catch the car ahead?", telemetry) == \
+        rm.catch_projection(car, track, "ahead")["spoken"]
+
+
+def test_gaining_still_asks_the_live_trend_not_the_lap_count():
+    from ai_race_engineer.config import AppConfig
+    from ai_race_engineer.llm import LLMClient
+    from ai_race_engineer.telemetry import TelemetrySnapshot
+
+    client = LLMClient(AppConfig())
+    client._chat_raw = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("trend answer was left to the model"))
+    car, track = _chase(
+        _chaser("Novak", 3, 3.0, [91.0] * 3),
+        behind=Rival(name="Novak", car_number="33", position=3, gap=3.0),
+        closing_behind_status="confirmed", closing_behind_change=0.3,
+        closing_behind_segments=3)
+    answer = client.generate("Is the car behind gaining?", TelemetrySnapshot(car, track))
+    assert answer == rm.adjacent_gap_trend(car, track, "behind")["spoken"]
+
+
+def test_a_lap_count_is_only_called_an_estimate_when_it_is_one():
+    """"About 18 to go" in an 18-lap-to-go race hedges a number that is exact."""
+    novak = _chaser("Novak", 3, 3.0, [91.0] * 3)
+    car, track = _chase(novak, laps_to_go=None)
+    track.laps_remaining = 10
+    assert "about 10 to go" not in rm.catch_projection(car, track)["spoken"]
+    assert ", 10 to go" in rm.catch_projection(car, track)["spoken"]
+
+    track.laps_remaining, track.time_remaining = None, 910.0
+    car.avg_lap_time = 91.0
+    assert "about 10 to go" in rm.catch_projection(car, track)["spoken"]

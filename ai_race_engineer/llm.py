@@ -46,7 +46,8 @@ _MAX_TOOL_ROUNDS = 2
 # incompatible units. A single direct call to one of these is therefore the
 # answer, not material for another model pass.
 _TERMINAL_TOOLS = {"fuel_plan", "pit_window", "position_report",
-                   "adjacent_gap_trend", "car_resources", "race_control_report"}
+                   "adjacent_gap_trend", "car_resources", "race_control_report",
+                   "catch_projection"}
 # Headroom for emitting a tool call, which does not fit the speech budget.
 _TOOL_CALL_TOKENS = 512
 # Room for a reasoning model to think *and* still answer. The speech budget
@@ -196,17 +197,15 @@ def _direct_telemetry_answer(
         return race_math.race_control_report(
             telemetry.car, telemetry.track).get("spoken")
 
-    ahead = any(phrase in normalised for phrase in (
-        "car ahead", "car in front", "guy ahead", "guy in front"))
-    behind = any(phrase in normalised for phrase in (
-        "car behind", "guy behind", "behind me"))
-    movement = any(term in normalised for term in (
-        "gain", "catch", "closing", "close the gap", "gap opening",
-        "gap increasing", "gap decreasing", "pulling away", "dropping back",
-        "reeling",
-    ))
-    if movement and (ahead or behind):
-        direction = "ahead" if ahead else "behind"
+    # Being caught or catching is answered from lap pace, the live gap
+    # movement from the mini-sector trend. A catch question about a car the
+    # driver names is left to the model, whose tool call names it.
+    intent = race_math.catch_intent(question)
+    if intent is not None:
+        kind, direction = intent
+        if kind == "projection":
+            return race_math.catch_projection(
+                telemetry.car, telemetry.track, direction).get("spoken")
         return race_math.adjacent_gap_trend(
             telemetry.car, telemetry.track, direction).get("spoken")
     return None

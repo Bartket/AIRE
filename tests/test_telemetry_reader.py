@@ -804,3 +804,131 @@ def test_shutdown_waits_for_a_read_in_progress():
     closer.join(timeout=2.0)
     assert reader._ir.closed == 1
     assert reader._started is False
+
+
+# ── Rival lap history ─────────────────────────────────────────────────
+#
+# The catch projection reads each rival's recent laps. The SDK publishes
+# only the lap each car just finished, so the reader collects them — and
+# whether CarIdxLastLapTime moves before, with or after CarIdxLapCompleted
+# is not documented, so nothing here may depend on the order.
+
+def _rival_reader():
+    return _Reader(
+        {"PlayerCarIdx": 0, "SessionNum": 2, "SessionFlags": 0,
+         "CarIdxLapCompleted": [5, 5], "CarIdxLastLapTime": [90.0, 91.0],
+         "CarIdxOnPitRoad": [False, False], "CarIdxTrackSurface": [3, 3]},
+        {"DriverInfo": {"Drivers": [
+            _driver(0, "Me Myself", 1, "GT3", 1, "Car", "Car"),
+            _driver(1, "Marco Rossi", 1, "GT3", 1, "Car", "Car")]}})
+
+
+def _tick(reader, **channels):
+    reader.values.update(channels)
+    reader._update_rival_laps()
+
+
+def _rival_laps(reader, idx=1):
+    return list(reader._rival_laps.get(idx, []))
+
+
+def test_a_rival_lap_takes_its_own_time_whichever_channel_moves_first():
+    """Reading CarIdxLastLapTime on the tick the lap count moves would record
+    the previous lap's time whenever the time updates a tick later — a
+    plausible lap time, one lap stale, under the new lap's verdict."""
+    r = _rival_reader()
+    _tick(r)                                              # baseline
+    # Count first, time a tick later.
+    _tick(r, CarIdxLapCompleted=[5, 6])
+    assert _rival_laps(r) == []
+    _tick(r, CarIdxLastLapTime=[90.0, 90.5])
+    # Time first, count a tick later.
+    _tick(r, CarIdxLastLapTime=[90.0, 90.7])
+    _tick(r, CarIdxLapCompleted=[5, 7])
+
+    laps = _rival_laps(r)
+    assert [(l.lap, l.time) for l in laps] == [(6, 90.5), (7, 90.7)]
+    assert all(l.clean and not l.caution for l in laps)
+    assert all(l.session_num == 2 for l in laps)
+
+
+def test_the_value_seen_at_connect_is_not_recorded_as_a_lap():
+    """The first reading is the lap finished before we were watching."""
+    r = _rival_reader()
+    _tick(r)
+    _tick(r, CarIdxLapCompleted=[5, 6])
+    _tick(r, CarIdxLapCompleted=[5, 7], CarIdxLastLapTime=[90.0, 90.4])
+    assert [(l.lap, l.time) for l in _rival_laps(r)] == [(7, 90.4)]
+
+
+def test_a_rival_lap_with_pit_road_an_off_or_a_caution_is_marked():
+    """A car that spun is measured on the laps since, not on the spin."""
+    r = _rival_reader()
+    _tick(r)
+    _tick(r, CarIdxOnPitRoad=[False, True])
+    _tick(r, CarIdxOnPitRoad=[False, False], CarIdxLapCompleted=[5, 6],
+          CarIdxLastLapTime=[90.0, 112.0])
+    _tick(r, CarIdxTrackSurface=[3, 0])                   # the spin
+    _tick(r, CarIdxTrackSurface=[3, 3], CarIdxLapCompleted=[5, 7],
+          CarIdxLastLapTime=[90.0, 97.5])
+    _tick(r, SessionFlags=0x00004000)                     # full-course caution
+    _tick(r, SessionFlags=0, CarIdxLapCompleted=[5, 8],
+          CarIdxLastLapTime=[90.0, 104.0])
+    _tick(r, CarIdxLapCompleted=[5, 9], CarIdxLastLapTime=[90.0, 90.6])
+
+    laps = _rival_laps(r)
+    assert [(l.clean, l.note, l.caution) for l in laps] == [
+        (False, "pit lane", False), (False, "off track", False),
+        (True, "", True), (True, "", False)]
+
+
+def test_a_car_index_taken_by_another_driver_starts_a_new_history():
+    """One car's laps must never describe another driver's pace."""
+    r = _rival_reader()
+    _tick(r)
+    _tick(r, CarIdxLapCompleted=[5, 6], CarIdxLastLapTime=[90.0, 90.5])
+    assert len(_rival_laps(r)) == 1
+    r.session_blob["DriverInfo"]["Drivers"][1] = _driver(
+        1, "Someone Else", 1, "GT3", 1, "Car", "Car")
+    _tick(r)
+    assert _rival_laps(r) == []
+
+
+def test_the_driver_is_not_recorded_as_their_own_rival():
+    r = _rival_reader()
+    _tick(r)
+    _tick(r, CarIdxLapCompleted=[6, 5], CarIdxLastLapTime=[89.0, 91.0])
+    assert _rival_laps(r, idx=0) == []
+
+
+def test_the_drivers_own_caution_laps_are_tagged_but_stay_clean():
+    """Tagged for the catch projection; `clean` untouched, because the fuel
+    average and the pace trend already have their own view of these laps."""
+    r = _Reader({"LapCompleted": 4, "SessionNum": 2, "OnPitRoad": False,
+                 "SessionFlags": 0})
+    r._update_laps()
+    r.values["SessionFlags"] = 0x00008000                 # caution waving
+    r._update_laps()
+    r.values.update(SessionFlags=0, LapCompleted=5, LapLastLapTime=95.0)
+    r._update_laps()
+    r.values.update(LapCompleted=6, LapLastLapTime=90.2)
+    r._update_laps()
+
+    laps = list(r._laps)
+    assert [(l.lap, l.clean, l.caution) for l in laps] == [
+        (5, True, True), (6, True, False)]
+
+
+def test_the_recorded_laps_reach_the_rivals_row_in_the_order():
+    """Collected and never attached would look exactly like no laps yet."""
+    r = _rival_reader()
+    r.session_blob["SessionInfo"] = {"Sessions": [
+        {"SessionNum": 2, "SessionType": "Race"}]}
+    r.values.update(CarIdxPosition=[1, 2], CarIdxLap=[6, 6],
+                    CarIdxF2Time=[0.0, 1.5])
+    _tick(r)
+    _tick(r, CarIdxLapCompleted=[5, 6], CarIdxLastLapTime=[90.0, 90.5])
+
+    field, _, _ = r._standings()
+    rossi = next(row for row in field if row.name == "Marco Rossi")
+    assert [(l.lap, l.time) for l in rossi.recent_laps] == [(6, 90.5)]

@@ -138,3 +138,46 @@ def test_practice_hundredths_are_allowed_and_thousandths_are_not():
         ["answer gives a time to the thousandth"]
     assert graded("You're 0.85 seconds off.", "Race") == \
         ["race-speed answer gives a time to the hundredth"]
+
+
+def test_a_rivals_recent_laps_survive_the_trace_round_trip():
+    """The catch projection reads them as records; replayed as dicts it
+    failed on the first trace that asked whether a car would catch."""
+    snapshot = TelemetrySnapshot(
+        CarTelemetry(position=2),
+        TrackConfig(session_type="Race", field=[
+            Rival(name="Novak", position=3,
+                  recent_laps=[LapRecord(lap=4, time=91.0, caution=True)])]))
+
+    restored = TelemetrySnapshot.from_dict(snapshot.to_dict())
+
+    lap = restored.track.field[0].recent_laps[0]
+    assert isinstance(lap, LapRecord) and lap.time == 91.0 and lap.caution
+
+
+def _catch_record(answer, route):
+    record = _record(answer)
+    record["question"] = "When will the car behind catch me?"
+    record["route"] = route
+    return record
+
+
+def test_a_lap_count_to_contact_must_come_from_the_calculator():
+    """A lap count to contact is a division. Said on the calculator's route it
+    is the calculator's; said by the model it is the model's arithmetic."""
+    answer = "Silva catches you in about 4 laps, 10 to go."
+    assert grade_record(_catch_record(answer, "deterministic")) == []
+    assert grade_record(_catch_record(answer, "tool:catch_projection")) == []
+    assert any("catch_projection" in failure for failure in
+               grade_record(_catch_record(answer, "model")))
+    named = _catch_record(answer, "tool:pace_compare")
+    named["question"] = "Will Silva catch me?"
+    assert any("catch_projection" in failure for failure in grade_record(named))
+
+
+def test_a_projection_answer_is_not_graded_as_a_trend_that_spoke_of_laps():
+    """The trend check fails any answer that mentions laps — right for the
+    mini-sector trend, and wrong for the question about when."""
+    failures = grade_record(_catch_record(
+        "Silva catches you in about 4 laps, 10 to go.", "deterministic"))
+    assert not any("adjacent trend" in failure for failure in failures)

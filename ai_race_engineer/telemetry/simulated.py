@@ -166,8 +166,18 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
 
         names = ["M. Rossi", "A. Silva", "T. Becker", "You", "J. Kowalski",
                  "L. Dubois", "K. Nakamura", "P. Novak"]
+        # Each rival's recent laps, set against the driver's own: Kowalski
+        # behind is quicker by a few tenths, so "will he catch me" has
+        # something to project offline. Fixture, not reference.
+        own = [l.time for l in self._lap_history(lap - 1) if l.clean][-3:]
+        own_pace = sum(own) / len(own) if own else self._lap_time
+        offsets = {"J. Kowalski": -0.3, "L. Dubois": -0.1}
         grid = []
         for i, nm in enumerate(names, start=1):
+            pace = own_pace + offsets.get(nm, (i - 4) * 0.15)
+            recent = [LapRecord(lap=n, time=round(pace + (n % 3) * 0.05, 3),
+                                session_num=0)
+                      for n in range(max(1, lap - 6), lap)]
             grid.append(Rival(name=nm, car_number=str(10 + i * 3), position=i,
                               car_class_id=1, car_class_name="Porsche Cup",
                               class_est_lap_time=self._lap_time,
@@ -175,6 +185,7 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
                               car_model_short="Porsche 911 Cup",
                               gap=None if i == 1 else round((i - 1) * 1.9 + math.sin(elapsed / 20 + i) * 0.4, 2),
                               best_lap=self._lap_time - 2.4 + i * 0.35,
+                              recent_laps=[] if nm == "You" else recent,
                               in_pits=(i == 7), is_player=(nm == "You")))
         fastest = min(grid, key=lambda r: r.best_lap)
 

@@ -135,6 +135,10 @@ class Rival:
     # a rival two seconds off his own best is a rival in trouble.
     last_lap: Optional[float] = None
     tyre_compound: Optional[int] = None
+    # Their last few completed laps, judged like the driver's own, so "is he
+    # quicker now?" has an answer that a best lap cannot give — a car that
+    # spun keeps its best lap, and so does one that has since lost pace.
+    recent_laps: List["LapRecord"] = field(default_factory=list)
     # Their last completed lap, split by sector.
     sector_times: List[Optional[float]] = field(default_factory=list)
     in_pits: bool = False
@@ -198,6 +202,18 @@ class LapRecord:
     # in practice is indistinguishable from one set in the race, and "you
     # started P7" could be quoting a practice out-lap.
     session_num: Optional[int] = None
+    # A caution was out at some point in the lap. Kept apart from `clean`
+    # on purpose: the fuel average and the pace trend already have their
+    # own view of these laps, and folding it in would change both. Read by
+    # the catch projection, where a lap behind the safety car says nothing
+    # about who is quicker.
+    caution: bool = False
+
+
+# The note on a lap that was clean by every flag but slow by the clock. The
+# catch projection reads it: three of these in a row at one pace are not
+# three bad laps, they are a car that has slowed down — damage, usually.
+OFF_THE_MEDIAN = "well off the median"
 
 
 @dataclass
@@ -557,6 +573,14 @@ class TelemetrySnapshot:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TelemetrySnapshot":
+        def rival(row: Dict[str, Any]) -> Rival:
+            # Their laps are nested records too; left as dicts, the catch
+            # projection fails on the first replayed trace that asks it.
+            row = dict(row)
+            row["recent_laps"] = [LapRecord(**lap) if isinstance(lap, dict) else lap
+                                  for lap in row.get("recent_laps", [])]
+            return Rival(**row)
+
         fields = {k: v for k, v in data.items() if k in CarTelemetry.__dataclass_fields__}
         # asdict() flattens the nested tyre records, so rebuild them: the
         # prompt calls TyreState.diagnosis() and a bare dict has no methods.
@@ -565,7 +589,7 @@ class TelemetrySnapshot:
                 fields[key] = TyreState(**fields[key])
         for key in ("ahead", "behind"):
             if isinstance(fields.get(key), dict):
-                fields[key] = Rival(**fields[key])
+                fields[key] = rival(fields[key])
         car = CarTelemetry(**fields)
         track_fields = {
             k: v for k, v in data.items() if k in TrackConfig.__dataclass_fields__
@@ -575,11 +599,11 @@ class TelemetrySnapshot:
             for lap in track_fields.get("laps", [])
         ]
         track_fields["field"] = [
-            Rival(**rival) if isinstance(rival, dict) else rival
-            for rival in track_fields.get("field", [])
+            rival(row) if isinstance(row, dict) else row
+            for row in track_fields.get("field", [])
         ]
         if isinstance(track_fields.get("fastest_lap"), dict):
-            track_fields["fastest_lap"] = Rival(**track_fields["fastest_lap"])
+            track_fields["fastest_lap"] = rival(track_fields["fastest_lap"])
         track = TrackConfig(**track_fields)
         snap = cls(car, track)
         snap._raw = data

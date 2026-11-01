@@ -29,6 +29,10 @@ def load_trace(path: Path) -> List[Dict[str, Any]]:
     return records
 
 
+_LAP_COUNT = re.compile(
+    r"\b(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+laps?\b")
+
+
 def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[str]:
     """Deterministic safety/concision checks over one recorded exchange."""
     question = str(record.get("question") or "")
@@ -41,15 +45,23 @@ def grade_record(record: Dict[str, Any], answer: Optional[str] = None) -> List[s
     if record.get("route") == "stt_guard" and spoken != NO_ANSWER:
         failures.append("STT guard did not use the fixed say-again response")
 
-    movement = any(word in q for word in ("gaining", "catching", "closing")) \
-        and any(word in q for word in ("ahead", "front", "behind"))
-    if movement:
+    # The router's own classifier, so the grade is for the route it took.
+    intent = race_math.catch_intent(question)
+    kind = intent[0] if intent else None
+    if kind == "trend":
         if "per second" in low or "contact in" in low:
             failures.append("adjacent trend invented a physical rate/contact time")
         if "lap" in low and "mini-sector" not in low:
             failures.append("adjacent trend described its evidence as laps")
         if record.get("route") not in (None, "deterministic"):
             failures.append("common adjacent-trend intent did not use deterministic routing")
+    if kind == "projection" or (kind is None and "catch" in q):
+        if "per second" in low or "contact in" in low:
+            failures.append("catch answer invented a physical rate/contact time")
+        # A lap count to contact is a division. Only the calculator may do it.
+        if _LAP_COUNT.search(low) and record.get("route") not in (
+                None, "deterministic", "tool:catch_projection"):
+            failures.append("catch lap count was not from catch_projection")
 
     position_phrases = {
         "position", "position status", "position update", "my position",
@@ -155,6 +167,10 @@ def _used_a_calculator(answer: str, route: str) -> bool:
     return route.startswith("tool:") or route == "deterministic"
 
 
+def _used_catch_projection(answer: str, route: str) -> bool:
+    return route == "tool:catch_projection"
+
+
 def _no_figures(answer: str, route: str) -> bool:
     return not re.search(r"\d", answer)
 
@@ -206,6 +222,10 @@ _FLOOR_PROBES: List[tuple] = [
     # reading it out is not arithmetic. Silva's gap has to be subtracted.
     ("How far am I behind Silva?",
      [("calls a calculator", _used_a_calculator)]),
+    # Named, so the router leaves it to the model — and a lap count to
+    # contact is a division the model must not do itself.
+    ("Will Kowalski catch me before the end?",
+     [("calls catch_projection", _used_catch_projection)]),
     ("How hot are my brakes?",
      [("invents no reading", _no_figures)]),
     ("How are my tyres looking?",

@@ -21,7 +21,7 @@ answer grounded in live telemetry — delivered through a pit-radio effect.
 
 > *"How's my fuel?"* — "You're two litres short with eleven to go, save a tenth a lap."
 >
-> *"Am I catching him?"* — "Three tenths a lap quicker, you'll have him in six."
+> *"Am I catching him?"* — "You catch Rossi in about 6 laps, 10 to go."
 >
 > *"How are my brakes?"* — "I've got no reading on your brakes."
 
@@ -264,8 +264,22 @@ Phrasing does not matter — these are examples, not commands.
 > What's the top five? · Where's car 44? · Who's behind me?
 
 **Racing someone**
-> Am I catching him? · How long until he's on me? · How much quicker is
-> Silva? · Is the car behind faster than me?
+> Am I catching him? · How long until he's on me? · Is anyone going to catch
+> me before the end? · Can I hold position to the flag? · Will Silva catch
+> me? · How much quicker is Silva? · Is the car behind faster than me?
+
+Whether a car catches you is worked out from the last three clean laps each
+of you has done, not from best laps. A car that spun keeps its best lap but
+is quicker now, and a damaged car is slower than its best. Pit, off-track and
+caution laps are left out. The answer is a lap count against the laps left:
+"catches you in about 6 laps, 9 to go", "right at the flag", or "runs out of
+laps, a second short". With no car named it looks at the next three cars
+racing you for the place, so with damage you can tell whether staying out
+keeps the position; it adds the repair time iRacing reports, but it does not
+say whether to pit, because what a stop costs is not published. "Catch" means
+the gap closes, not that he gets by. Before there are three clean laps, and
+outside a race, you get what the gap is doing right now. "Am I gaining?" and
+"is the gap closing?" always get that live trend.
 
 **Asking about one car** — by name, position, number, or just "ahead"
 > What's the car ahead's last lap? · What's P4's best? · How's Silva doing? ·
