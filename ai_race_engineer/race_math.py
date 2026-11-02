@@ -50,7 +50,7 @@ logger = logging.getLogger("race-engineer")
 SPOKEN_VERBATIM = frozenset({
     "fuel_plan", "pit_window", "position_report", "adjacent_gap_trend",
     "car_resources", "race_control_report", "status_report", "car_check",
-    "catch_projection",
+    "catch_projection", "pace_reference",
 })
 
 # The radio budget for anything in SPOKEN_VERBATIM while a session is running.
@@ -68,7 +68,8 @@ SPOKEN_BUDGET_WORDS = 30
 # headline outright — behind a safety car the tank goes further than the
 # racing average says — so it outranks the window, which has a calculator of
 # its own the driver can ask.
-_FUEL_RADIO_ORDER = ("stops", "extra_lap", "estimate", "last_lap", "window")
+_FUEL_RADIO_ORDER = ("stops", "extra_lap", "estimate", "last_lap", "usual",
+                     "window")
 
 
 # ── Result helpers ──────────────────────────────────────────────────
@@ -257,6 +258,12 @@ def _spoken_margin_laps(laps: float) -> Optional[str]:
 
 _AMOUNT_WORDS = ("how much", "litres", "liters", "gallons", "kilos",
                  "in the tank", "on board")
+# Wording that asks what the car burns, not whether the tank reaches the
+# flag. "What is my fuel consumption per lap?" was answered "I don't know how
+# many laps are left" three times running — the one figure asked for needs no
+# lap count at all.
+_BURN_WORDS = ("consumption", "usage", "per lap", "a lap", "each lap",
+               "burn", "using", "use per")
 
 
 def asks_for_amount(question: str) -> bool:
@@ -270,12 +277,40 @@ def asks_for_amount(question: str) -> bool:
     return any(word in q for word in _AMOUNT_WORDS)
 
 
+# "How much do I need", "what do I put in": the amount to add, not the tank.
+_ADD_WORDS = ("add", "put in", "take on", "fill", "need", "should i take",
+              "to finish", "to the end")
+
+
+def asks_to_add(question: str) -> bool:
+    q = str(question or "").lower()
+    return any(word in q for word in _ADD_WORDS)
+
+
+def asks_for_burn(question: str) -> bool:
+    """Whether a fuel question asks what the car uses a lap."""
+    q = str(question or "").lower()
+    return any(word in q for word in _BURN_WORDS)
+
+
 def fuel_radio(result: Dict[str, Any], question: str) -> str:
-    """`fuel_plan`'s radio line, with the tank amount when it was asked for."""
+    """`fuel_plan`'s radio line, led by what the question actually asked:
+    the burn, the tank amount, or just the verdict."""
     spoken = result.get("spoken", "")
-    tank = (result.get("clauses") or {}).get("tank")
-    if tank and asks_for_amount(question):
-        return f"{tank} {spoken}"
+    clauses = result.get("clauses") or {}
+    lead = None
+    if asks_for_burn(question) and clauses.get("burn_rate"):
+        # The burn names its own source, so the headline goes unlabelled, and
+        # the laps-left note was not asked. Labelled twice and with the note,
+        # this ran to 35 words — 15 seconds of radio for one number.
+        headline = result.get("headline_plain") or result.get("headline") or spoken
+        return f"{clauses['burn_rate']} {headline}"
+    if lead is None and asks_to_add(question):
+        lead = clauses.get("add")
+    if lead is None and asks_for_amount(question):
+        lead = clauses.get("tank")
+    if lead and lead not in spoken:
+        return f"{lead} {spoken}"
     return spoken
 
 
@@ -563,9 +598,74 @@ def _plain(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", pronounce.fold(str(text or "")).lower()).strip()
 
 
+def _fuel_source(car: CarTelemetry) -> Optional[str]:
+    """Which burn the fuel calls plan on: "measured", "stated", "history".
+
+    Measured clean laps of this session always win. Before there are any,
+    the driver's own figure, said on the radio, beats iRacing's history —
+    it is what they are planning on — and iRacing's history beats nothing,
+    which is what the opening laps used to get: "I haven't measured a
+    racing-lap burn yet", three times in one race, with ten laps of this car
+    on this track sitting in fueldata.ini.
+    """
+    if car.fuel_per_lap is not None and car.fuel_per_lap > 0:
+        return "measured"
+    if (getattr(car, "fuel_burn_stated", None) or 0) > 0:
+        return "stated"
+    if (getattr(car, "fuel_history_per_lap", None) or 0) > 0:
+        return "history"
+    return None
+
+
+#: Measured burn this far from the driver's figure or iRacing's history is
+#: worth saying: over a 30-lap stint 5 % is a lap and a half of fuel.
+_BURN_DIVERGENCE = 0.05
+
+
+def _source_label(car: CarTelemetry) -> str:
+    """What a fuel answer not built on measured laps is built on, as words
+    to lead it with. Empty when it is measured."""
+    source = _fuel_source(car)
+    unit = getattr(car, "fuel_unit", "litres")
+    if source == "stated":
+        return f"On your {_burn_figure(car.fuel_burn_stated)} {unit} a lap,"
+    if source == "history":
+        return "From my data on this car here,"
+    return ""
+
+
+def _labelled(result: Dict[str, Any], car: CarTelemetry) -> Dict[str, Any]:
+    """Lead a fuel answer with its source, so a figure from history or from
+    the driver is never heard as one measured today."""
+    label = _source_label(car)
+    result["fuel_source"] = _fuel_source(car)
+    result["headline_plain"] = result.get("headline") or result.get("spoken", "")
+    if not label or not result.get("available"):
+        return result
+    for key in ("spoken", "headline"):
+        text = result.get(key)
+        if text and not text.startswith(label):
+            result[key] = f"{label} {text[0].lower()}{text[1:]}"
+    return result
+
+
 def _fuel_burn_bounds(car: CarTelemetry) -> Tuple[Optional[float], Optional[float],
                                                    Optional[float], int, str]:
-    """Typical, low and high measured clean-lap burn in spoken units."""
+    """Typical, low and high clean-lap burn in spoken units, and how sure.
+
+    Measured when this session has measured it, else the driver's figure,
+    else iRacing's history; see `_fuel_source`.
+    """
+    source = _fuel_source(car)
+    if source == "stated":
+        stated = car.fuel_burn_stated
+        return stated, stated, stated, 0, "your figure"
+    if source == "history":
+        typical = car.fuel_history_per_lap
+        low = car.fuel_history_min or typical
+        high = car.fuel_history_max or typical
+        return (typical, min(low, typical), max(high, typical),
+                int(car.fuel_history_samples or 0), "earlier runs")
     typical = car.fuel_per_lap
     if typical is None or typical <= 0:
         return None, None, None, 0, "unavailable"
@@ -805,9 +905,108 @@ def _fuel_stop_window(car: CarTelemetry, track: TrackConfig, laps: float,
 
 # ── The calculations ────────────────────────────────────────────────
 
+def _burn_figure(value: float) -> str:
+    """A per-lap burn at radio precision: a tenth, as every race figure is,
+    except under one unit a lap, where a tenth is a 6 % error on a formula
+    car's 0.85 and two figures are the least that still mean something."""
+    return f"{value:.1f}" if value >= 1.0 else f"{value:.2f}"
+
+
+def _burn_rate_clause(car: CarTelemetry, typical: float, samples: int) -> str:
+    """The burn as a sentence, and what it was measured over."""
+    unit = getattr(car, "fuel_unit", "litres")
+    source = _fuel_source(car)
+    if source == "stated":
+        return (f"You told me {_burn_figure(typical)} {unit} a lap; "
+                "I haven't measured one of my own yet.")
+    if source == "history":
+        return f"My data has this car on {_burn_figure(typical)} {unit} a lap here."
+    over = (f" over your last {_plural(samples, 'clean lap')}" if samples >= 2 else "")
+    return f"You're using {_burn_figure(typical)} {unit} a lap{over}."
+
+
+def _usual_clause(car: CarTelemetry, typical: float) -> Optional[str]:
+    """Measured burn set against what the driver planned on, when they differ.
+
+    The driver who said "plan on 3.2 a lap" chose a fuel load on it; using
+    3.4 is the thing to tell them. Without a stated figure, iRacing's history
+    for the car here is the yardstick.
+    """
+    if _fuel_source(car) != "measured" or typical <= 0:
+        return None
+    unit = getattr(car, "fuel_unit", "litres")
+    stated = getattr(car, "fuel_burn_stated", None)
+    history = getattr(car, "fuel_history_per_lap", None)
+    if stated and stated > 0:
+        reference, what = stated, f"the {_burn_figure(stated)} you planned on"
+    elif history and history > 0:
+        reference, what = history, f"the usual {_burn_figure(history)} for this car here"
+    else:
+        return None
+    if abs(typical - reference) / reference <= _BURN_DIVERGENCE:
+        return None
+    more = "more" if typical > reference else "less"
+    return (f"You're using {_burn_figure(typical)} {unit} a lap, {more} than "
+            f"{what}.")
+
+
+def _fuel_range(car: CarTelemetry, track: TrackConfig, have: float,
+                bounds: Tuple, session: str,
+                note: Optional[str] = None) -> Dict[str, Any]:
+    """What the tank holds in laps, with no finish to measure it against.
+
+    Outside a race there is no finish; with the lap count unknown, or the
+    flag already out, there is none to use. None of that is a reason to
+    withhold the burn, which needs no lap count.
+    """
+    typical, low, high, samples, confidence = bounds
+    unit = getattr(car, "fuel_unit", "litres")
+    laps_of_fuel = have / typical
+    burn = _burn_rate_clause(car, typical, samples)
+    clauses: Dict[str, str] = {"burn_rate": burn}
+    if getattr(track, "finished", False):
+        # Debrief: what it used is the story; laps of fuel left is not.
+        headline = burn
+        clauses["tank"] = f"{have:.1f} {unit} left in it."
+    else:
+        # Whole laps, rounded down: a range is a promise.
+        headline = (f"You've got {have:.1f} {unit} on board, about "
+                    f"{_plural(math.floor(laps_of_fuel), 'lap')} of fuel.")
+    if note:
+        clauses["laps_unknown"] = note
+    spoken = headline if not note else f"{headline} {note}"
+    return _yes(
+        spoken,
+        headline=headline,
+        clauses=clauses,
+        fuel_in_tank=round(have, 2), unit=unit,
+        burn_per_lap=round(typical, 3),
+        burn_per_lap_low=round(low, 3),
+        burn_per_lap_high=round(high, 3),
+        fuel_burn_samples=samples,
+        fuel_confidence=confidence,
+        laps_of_fuel=round(laps_of_fuel, 1),
+        burn_last_lap=car.fuel_last_lap,
+        burn_last_lap_clean=car.fuel_last_lap_clean,
+        burn_this_stint=car.fuel_used_stint,
+        strategy_available=False,
+        session=session,
+    )
+
+
 def fuel_plan(car: CarTelemetry, track: TrackConfig,
               target_laps: Optional[float] = None,
               target_minutes: Optional[float] = None) -> Dict[str, Any]:
+    """Can we finish on the fuel in the tank, and if not, by how much?
+
+    Labelled with what the burn came from; see `_fuel_plan`.
+    """
+    return _labelled(_fuel_plan(car, track, target_laps, target_minutes), car)
+
+
+def _fuel_plan(car: CarTelemetry, track: TrackConfig,
+               target_laps: Optional[float] = None,
+               target_minutes: Optional[float] = None) -> Dict[str, Any]:
     """Can we finish on the fuel in the tank, and if not, by how much?
 
     `target_minutes` answers "how much fuel for the next twenty minutes",
@@ -832,27 +1031,16 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
             pit_now=False,
         )
 
+    bounds = (typical_burn, burn_low, burn_high, burn_samples, fuel_confidence)
     # Outside a race there is no finish to reach, so report range instead of
     # inventing a target and answering "you will make it".
     if target_laps is None and not _is_race(track):
-        laps_of_fuel = have / typical_burn
-        # Whole laps, rounded down: a range is a promise, and the burn rate
-        # is for the driver who asks for it, not for every fuel question.
-        return _yes(
-            f"You've got {have:.1f} {unit} on board, about "
-            f"{_plural(math.floor(laps_of_fuel), 'lap')} of fuel.",
-            fuel_in_tank=round(have, 2), unit=unit,
-            burn_per_lap=round(typical_burn, 3),
-            burn_per_lap_low=round(burn_low, 3),
-            burn_per_lap_high=round(burn_high, 3),
-            fuel_burn_samples=burn_samples,
-            fuel_confidence=fuel_confidence,
-            laps_of_fuel=round(laps_of_fuel, 1),
-            burn_last_lap=car.fuel_last_lap,
-            burn_last_lap_clean=car.fuel_last_lap_clean,
-            burn_this_stint=car.fuel_used_stint,
-            session="not a race — reporting range, not whether it reaches a finish",
-        )
+        return _fuel_range(car, track, have, bounds,
+                           "not a race — reporting range, not whether it reaches a finish")
+    if target_laps is None and target_minutes is None \
+            and getattr(track, "finished", False):
+        return _fuel_range(car, track, have, bounds,
+                           "race finished — reporting what the car used")
 
     estimated_from_clock = False
     if target_laps is not None:
@@ -867,7 +1055,9 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     else:
         laps = _laps_to_go(car, track)
     if laps is None:
-        return _no("I don't know how many laps are left, so I can't call the fuel.")
+        return _fuel_range(car, track, have, bounds,
+                           "laps left unknown — reporting range only",
+                           note="I can't see how many laps are left.")
 
     needed_likely = laps * typical_burn
     margin_likely = have - needed_likely
@@ -912,6 +1102,7 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
             )
         return _yes(
             spoken,
+            clauses={"burn_rate": _burn_rate_clause(car, typical_burn, burn_samples)},
             fuel_in_tank=round(have, 2), unit=unit,
             burn_per_lap=round(typical_burn, 3),
             burn_per_lap_low=round(burn_low, 3),
@@ -957,7 +1148,9 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
     # rest goes to `clauses`, which the model still receives in full when it
     # is the one talking, so nothing is lost — it is simply not all said at
     # once, to a driver who is braking.
-    clauses: Dict[str, str] = {}
+    # Not in _FUEL_RADIO_ORDER: said only when the question asks for it.
+    clauses: Dict[str, str] = {
+        "burn_rate": _burn_rate_clause(car, typical_burn, burn_samples)}
 
     if margin >= 0:
         spare_laps = margin / per_lap
@@ -1059,12 +1252,27 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
             clauses["last_lap"] = (f"Last lap used {last:.2f} {unit}, well above "
                                    f"average — that won't reach the flag.")
 
+    usual = _usual_clause(car, typical_burn)
+    if usual:
+        clauses["usual"] = usual
+
+    # What to put in: enough for the conservative burn to the flag — a lap
+    # more when the clock sets the distance — and never more than fits.
+    to_add = max(0.0, needed + (per_lap if timed_estimate else 0.0) - have)
+    if capacity and capacity > 0:
+        to_add = min(to_add, max(0.0, capacity - have))
+    if to_add > 0:
+        # Nothing to add is already the verdict; the tank amount answers
+        # "how much" then.
+        clauses["add"] = f"Take {to_add:.1f} {unit} to get to the end."
+
     spoken = _radio(headline, clauses, _FUEL_RADIO_ORDER)
 
     return _yes(
         spoken,
         headline=headline,
         clauses=clauses,
+        fuel_to_add=round(to_add, 2),
         fuel_in_tank=round(have, 2),
         unit=unit,
         burn_last_lap=last,
@@ -1106,6 +1314,12 @@ def fuel_plan(car: CarTelemetry, track: TrackConfig,
 
 
 def pit_window(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """Earliest and latest lap we can stop and still reach the flag,
+    labelled with what the burn came from; see `_pit_window`."""
+    return _labelled(_pit_window(car, track), car)
+
+
+def _pit_window(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     """Earliest and latest lap we can stop and still reach the flag.
 
     Latest is set by the fuel in the tank; earliest by whether a full tank
@@ -1573,6 +1787,31 @@ def status_report(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
 
 def adjacent_gap_trend(car: CarTelemetry, track: TrackConfig,
                        direction: str) -> Dict[str, Any]:
+    """What the gap to the car ahead/behind is doing now, and lap on lap.
+
+    "Just now" compares the last few mini-sectors of this lap. Lap on lap
+    compares the same points of the track a lap apart, which is what decides
+    whether a gap is really coming down; it is added once it is measured.
+    See `_adjacent_gap_now`.
+    """
+    result = _adjacent_gap_now(car, track, direction)
+    rival = car.ahead if str(direction or "").strip().lower() == "ahead" else car.behind
+    rate = None if rival is None else _measured_rate(rival)
+    if not result.get("available") or rate is None or not _is_race(track):
+        return result
+    digits = lap_digits(track)
+    if abs(rate) < _CLOSING_FLOOR:
+        lap_on_lap = "Lap on lap it's level."
+    else:
+        lap_on_lap = (f"Lap on lap the gap is {'closing' if rate > 0 else 'opening'} "
+                      f"{_spoken_delta(abs(rate), digits)} a lap.")
+    spoken = result["spoken"].replace(", too early to call a trend.", ".")
+    return dict(result, spoken=f"{spoken} {lap_on_lap}",
+                closing_per_lap=round(rate, 3), gap_comparisons=rival.gap_rate_pairs)
+
+
+def _adjacent_gap_now(car: CarTelemetry, track: TrackConfig,
+                      direction: str) -> Dict[str, Any]:
     """Is the physical car ahead/behind gaining, from live distance samples?
 
     This is deliberately separate from pace_compare: best laps describe
@@ -1708,6 +1947,9 @@ _ON_YOU = 0.5
 _STEP_SPREAD = 1.0
 # Cars behind looked at when the driver names none.
 _PACK = 3
+# Same-gate comparisons a measured gap rate needs before it replaces the lap
+# times: half a lap of them, about a lap and a half behind the same car.
+_GAP_RATE_PAIRS = 10
 # Flags under which a gap says nothing about who is quicker.
 _NEUTRALISED = ("Caution", "Caution Waving", "Red")
 
@@ -1763,8 +2005,17 @@ def _gap_between(car: CarTelemetry, track: TrackConfig, me: Rival,
     return their_gap - my_gap
 
 
+def _measured_rate(them: Rival) -> Optional[float]:
+    """The gap to `them` shrinking per lap, as measured, once there is
+    enough of it to stand on."""
+    if (getattr(them, "gap_rate_pairs", 0) or 0) < _GAP_RATE_PAIRS:
+        return None
+    return getattr(them, "gap_rate_per_lap", None)
+
+
 def _catch_one(car: CarTelemetry, track: TrackConfig, me: Rival, them: Rival,
-               my_pace: float, laps_to_go: float, estimate: bool) -> Dict[str, Any]:
+               my_pace: Optional[float], laps_to_go: float,
+               estimate: bool) -> Dict[str, Any]:
     """The projection for one car, as numbers and a verdict."""
     row: Dict[str, Any] = {
         "driver": them.name, "car_number": them.car_number,
@@ -1778,16 +2029,23 @@ def _catch_one(car: CarTelemetry, track: TrackConfig, me: Rival, them: Rival,
     if gap is None:
         row["verdict"] = "no_gap"
         return row
-    pace = _recent_pace(_this_segment(them.recent_laps, track))
     behind = gap > 0
     row.update(gap_seconds=round(abs(gap), 2), they_are_behind=behind)
-    if pace is None:
-        row["verdict"] = "no_pace"
-        return row
     # Positive means the gap is shrinking, whichever car is doing the catching.
-    closing = (my_pace - pace) if behind else (pace - my_pace)
-    row.update(their_pace=round(pace, 3), laps_used=_CATCH_LAPS,
-               closing_per_lap=round(closing, 3))
+    closing = _measured_rate(them)
+    if closing is not None:
+        # The gap itself, at the same points on the lap one lap apart: what
+        # the projection is about, measured rather than predicted.
+        row.update(closing_per_lap=round(closing, 3), closing_basis="measured gap",
+                   gap_comparisons=them.gap_rate_pairs)
+    else:
+        pace = _recent_pace(_this_segment(them.recent_laps, track))
+        if pace is None or my_pace is None:
+            row["verdict"] = "no_pace"
+            return row
+        closing = (my_pace - pace) if behind else (pace - my_pace)
+        row.update(their_pace=round(pace, 3), laps_used=_CATCH_LAPS,
+                   closing_per_lap=round(closing, 3), closing_basis="lap times")
     if abs(gap) <= _ON_YOU:
         row["verdict"] = "already_there"
     elif closing < _CLOSING_FLOOR:
@@ -1941,12 +2199,9 @@ def catch_projection(car: CarTelemetry, track: TrackConfig,
     # count as given and divides the time left by a lap time otherwise.
     estimate = (bool(car.laps_to_go_is_estimate) if car.laps_to_go is not None
                 else track.laps_remaining is None)
+    # Needed only where a car has no measured gap rate yet; checked once the
+    # cars are known.
     my_pace = _recent_pace(_race_laps(track))
-    if my_pace is None:
-        return _catch_fallback(
-            car, track, adjacent,
-            "I need three clean laps from you before I can put a lap count on it.",
-            "No lap count until you've three clean laps.")
 
     if mode == "pack":
         behind = sorted((r for r in track.field
@@ -1982,6 +2237,12 @@ def catch_projection(car: CarTelemetry, track: TrackConfig,
                         cars=[])
         targets = [them]
         context = _class_context(track, them)
+
+    if my_pace is None and not any(_measured_rate(r) is not None for r in targets):
+        return _catch_fallback(
+            car, track, adjacent,
+            "I need three clean laps from you before I can put a lap count on it.",
+            "No lap count until you've three clean laps.")
 
     digits = lap_digits(track)
     rows = [_catch_one(car, track, me, r, my_pace, laps_to_go, estimate)
@@ -2034,14 +2295,16 @@ def catch_projection(car: CarTelemetry, track: TrackConfig,
         direction=("ahead" if mode == "ahead" else "behind" if pack
                    else ("behind" if rated[0]["they_are_behind"] else "ahead")),
         cars=[{k: v for k, v in r.items() if k != "_who"} for r in rows],
-        your_pace=round(my_pace, 3),
+        your_pace=None if my_pace is None else round(my_pace, 3),
         laps_to_go=round(laps_to_go, 1),
         laps_to_go_is_estimate=estimate,
         repair_required=car.repair_required,
         repair_optional=car.repair_optional,
-        basis=("mean of each car's last 3 clean laps, caution laps excluded; "
-               "catch means the gap closed to zero, not a pass; assumes the "
-               "pace holds"),
+        basis=("the gap measured at the same points on the lap one lap apart "
+               "where there is half a lap of that (closing_basis 'measured gap'), "
+               "else the mean of each car's last 3 clean laps, caution laps "
+               "excluded; catch means the gap closed to zero, not a pass; "
+               "assumes the rate holds"),
         **context,
     )
 
@@ -2135,6 +2398,65 @@ def fastest_lap(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
                 lap_time=best.best_lap, lap_time_spoken=_laptime(best.best_lap, lap_digits(track)),
                 your_best=mine, delta=None if delta is None else round(delta, 3),
                 is_you=bool(mine and delta is not None and delta <= 0.001))
+
+
+def pace_reference(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """What this car has done here before, against what it is doing now.
+
+    The stored best and optimal are the laps iRacing's delta bar measures
+    against, kept across sessions, so this answers "what pace can I do here"
+    from the driver's own history rather than from anyone's guess.
+
+    They are the best *outside a race*, and the words say so. Across 54
+    recorded sessions a race lap never replaced them — 1:45.450 driven at
+    Mexico City in a race, the stored best left at 1:46.481 — while practice
+    and test laps did. Whether a qualifying lap does is not known. A quicker
+    lap today, race laps included, is said beside it.
+    """
+    digits = lap_digits(track)
+    best = getattr(car, "stored_best_lap", None)
+    optimal = getattr(car, "stored_optimal_lap", None)
+    today = car.best_lap_time
+    if not best:
+        if today:
+            return _no(f"I haven't got your stored best here yet, it shows after "
+                       f"two clean laps. Today's best is {_laptime(today, digits)}.")
+        return _no("I haven't got your best here yet — give me two clean laps.")
+
+    spoken = f"Your best here outside a race is {_laptime(best, digits)}"
+    if optimal and optimal < best - 0.005:
+        spoken += f", optimal {_laptime(optimal, digits)}"
+    # A quicker lap today — a race lap, which is never stored — is the real
+    # potential, so it is said beside the best and the pace is set against it.
+    beaten = bool(today and today < best - 0.005)
+    reference = today if beaten else best
+    if beaten:
+        spoken += f"; today's {_laptime(today, digits)} beats it"
+    now, lead = getattr(car, "pace_lap", None), "you're averaging"
+    if not now:
+        now, lead = car.last_lap_time, "your last lap was"
+    off = None if not now else now - reference
+    if off is None:
+        spoken += "."
+    elif off > 0.005:
+        spoken += (f"; {lead} {_laptime(now, digits)}, "
+                   f"{_spoken_delta(off, digits)} off.")
+    else:
+        spoken += "; you're on it."
+    return _yes(
+        spoken,
+        stored_best_lap=round(best, 3),
+        stored_optimal_lap=None if not optimal else round(optimal, 3),
+        todays_best_lap=today,
+        current_pace=None if not now else round(now, 3),
+        current_pace_basis=("mean of recent clean laps"
+                            if getattr(car, "pace_lap", None) else "last lap"),
+        off_stored_best=None if not now else round(now - best, 3),
+        todays_best_beats_stored=beaten,
+        basis=("the driver's best and optimal lap for this car on this track from "
+               "earlier sessions outside a race — race laps are never stored there; "
+               "call it \"my data\" and never name the sim or its files"),
+    )
 
 
 def pace_compare(car: CarTelemetry, track: TrackConfig, target: str) -> Dict[str, Any]:
@@ -2644,6 +2966,12 @@ def race_history(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
 
 
 def stint_projection(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
+    """Where the fuel runs out relative to the flag, labelled with what the
+    burn came from; see `_stint_projection`."""
+    return _labelled(_stint_projection(car, track), car)
+
+
+def _stint_projection(car: CarTelemetry, track: TrackConfig) -> Dict[str, Any]:
     """Where the fuel runs out relative to the flag."""
     if not _is_race(track):
         return _no("There's no race distance to compare against in this session.")
@@ -2818,6 +3146,17 @@ _TOOLS: List[Dict[str, Any]] = [
             },
         },
         "fn": standings,
+    },
+    {
+        "name": "pace_reference",
+        "description": (
+            "The driver's best and optimal lap on this track in this car from "
+            "earlier sessions outside a race, against their current pace and "
+            "today's best. Use for 'what's my best here', 'what pace can I do', "
+            "'how far off my best am I'."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+        "fn": pace_reference,
     },
     {
         "name": "fastest_lap",

@@ -37,9 +37,23 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
         self._lap_time = lap_time
         self._race_laps = race_laps
         self._rng = random.Random(0xF1)
+        self._stated_burn = None
 
     def is_connected(self) -> bool:
         return True
+
+    def set_stated_fuel_burn(self, value, unit=None):
+        """Held as given: this fixture reports fuel in litres, and a stated
+        burn is only ever compared, never converted, here."""
+        try:
+            litres = float(value)
+        except (TypeError, ValueError):
+            return None
+        if str(unit or "litres").lower().startswith(("k", "gal")) \
+                or not 0.1 <= litres <= 20.0:
+            return None
+        self._stated_burn = litres
+        return litres
 
     def _lap_history(self, completed: int) -> list:
         """A plausible race so far: a climb from P7, a stop, and one off.
@@ -138,6 +152,7 @@ class SimulatedTelemetryAdapter(TelemetryAdapter):
             fuel_burn_samples=min(5, lap - 1),
             fuel_burn_min=2.4,
             fuel_burn_max=2.5,
+            fuel_burn_stated=self._stated_burn,
             ahead=Rival(name="M. Rossi", short_name="Rossi, M.", car_number="44",
                         car_class_id=1, car_class_name="Porsche Cup",
                         car_id=1, car_model="Porsche 911 GT3 Cup (992)",

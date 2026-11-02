@@ -8,6 +8,8 @@ it is where those go wrong silently.
     uv run pytest tests/ -q
 """
 
+from pathlib import Path
+
 from ai_race_engineer.telemetry import NO_LAP_TIME, LapRecord, TrackConfig
 from ai_race_engineer.telemetry.irsdk_reader import iRacingTelemetryReader
 
@@ -1086,6 +1088,189 @@ def test_track_wetness_uses_the_sdks_names():
     names = _enum_map("TrackWetness", _TRACK_WETNESS)
     assert names[3] == "very lightly wet"
     assert names[5] == "moderately wet"
+
+
+_FUEL_DATA = Path(__file__).parent / "fixtures" / "fueldata.ini"
+
+
+def _fuel_history_reader(monkeypatch, car_path, track_name, **values):
+    from ai_race_engineer.telemetry import irsdk_reader
+
+    monkeypatch.setattr(irsdk_reader, "fuel_data_path", lambda: _FUEL_DATA)
+    return _Reader({"PlayerCarIdx": 0, **values}, {
+        "WeekendInfo": {"TrackName": track_name},
+        "DriverInfo": {"DriverCarFuelKgPerLtr": 0.75, "Drivers": [
+            _driver(0, "You", 1, "Cup", 1, "Car", "Car", CarPath=car_path)]},
+    })
+
+
+def test_iracing_fuel_history_is_read_in_kilos_and_given_in_litres(monkeypatch):
+    """fueldata.ini lines copied from a real install. Porsche Cup at Bathurst
+    reads 2.34-2.47 kg; the recorded sessions measured 3.12-3.30 L."""
+    reader = _fuel_history_reader(monkeypatch, "porsche9922cup", "bathurst")
+    litres = reader._fuel_history_litres()
+    assert len(litres) == 10
+    assert round(min(litres), 2) == 3.12 and round(max(litres), 2) == 3.29
+
+
+def test_fuel_history_keys_are_the_yaml_names_with_backslashes(monkeypatch):
+    reader = _fuel_history_reader(monkeypatch, "caterham caterhamacademy",
+                                  "summit summit raceway")
+    assert len(reader._fuel_history_litres()) == 10
+    nowhere = _fuel_history_reader(monkeypatch, "porsche9922cup", "nowhere")
+    assert nowhere._fuel_history_litres() == []
+
+
+def test_a_stated_burn_is_held_for_the_session_in_litres(monkeypatch):
+    reader = _fuel_history_reader(monkeypatch, "porsche9922cup", "bathurst")
+    assert reader.set_stated_fuel_burn(2.5) == 2.5             # driver's unit
+    assert round(reader.set_stated_fuel_burn(2.4, "kilograms"), 2) == 3.2
+    assert round(reader.set_stated_fuel_burn(1, "gallons"), 3) == 3.785
+    assert reader.set_stated_fuel_burn(250) is None             # misheard
+    assert round(reader._stated_burn, 3) == 3.785
+    reader._drop_session_history()
+    assert reader._stated_burn is None
+
+
+def test_before_the_green_a_timed_race_is_its_scheduled_length():
+    """SessionTimeRemain counts down the gridding until the start — 263.8 s
+    at Imola before a 20-minute race."""
+    reader = _Reader({"SessionNum": 0, "SessionState": 1,
+                      "SessionTimeRemain": 263.8},
+                     {"SessionInfo": {"Sessions": [{
+                         "SessionNum": 0, "SessionType": "Race",
+                         "SessionTime": "1200.0000 sec"}]}})
+    assert reader._time_remaining() == 1200.0
+    reader.values["SessionState"] = 4
+    assert reader._time_remaining() == 263.8
+
+
+def _drive_lap(r, completed, lap_time, best_delta, optimal_delta, clock):
+    """One lap's end: the deltas before the line, the count, then the time."""
+    _lap_poll(r, LapDeltaToBestLap=best_delta, LapDeltaToBestLap_OK=True,
+              LapDeltaToOptimalLap=optimal_delta, LapDeltaToOptimalLap_OK=True,
+              SessionTime=clock)
+    _lap_poll(r, LapCompleted=completed, SessionTime=clock + 0.1)
+    _lap_poll(r, LapLastLapTime=lap_time, SessionTime=clock + 1.0)
+
+
+def test_the_stored_best_needs_two_laps_to_agree():
+    """A Bathurst race, laps and deltas as recorded. Lap 1, from the
+    standing start, reads 2:08.095 against a stored 2:05.445; laps 2 and 3
+    agree on the real figure."""
+    r = _Reader({"LapCompleted": 0, "LapLastLapTime": -1.0, "SessionTime": 0.0})
+    r._update_laps()
+    _drive_lap(r, 1, 131.837, 3.742, 4.603, 140.0)
+    _drive_lap(r, 2, 128.336, 2.891, 3.929, 270.0)
+    assert r._stored_laps == {}
+    _drive_lap(r, 3, 127.974, 2.528, 3.567, 400.0)
+    assert r._stored_laps == {"best": 125.446, "optimal": 124.407}
+
+
+def test_a_new_best_is_taken_from_the_lap_that_set_it():
+    """Beaten on the last lap of a session, the new stored best showed once
+    and was never reported: there was no second lap to agree."""
+    r = _Reader({"LapCompleted": 33, "LapLastLapTime": 126.857, "SessionTime": 0.0})
+    r._update_laps()
+    _drive_lap(r, 34, 125.667, -0.569, 0.8, 130.0)     # beats 2:06.236
+    assert r._stored_laps.get("best") != 125.667
+    _drive_lap(r, 35, 127.059, 1.392, 2.2, 260.0)      # now measured against it
+    assert r._stored_laps["best"] == 125.667
+
+
+def _gate_by_gate(r, gates, gap_at, events=None):
+    """Drive gate by gate with the car behind (index 1) `gap_at(n)` seconds
+    back at gate n, as CarIdxEstTime would show it."""
+    for n in gates:
+        lap, pct = 5 + n // 20, (n % 20 + 0.5) / 20
+        mine = pct * 90.0
+        gap = gap_at(n)
+        r.values.update({
+            "LapCompleted": lap, "LapDistPct": pct,
+            "CarIdxLapCompleted": [lap, lap], "CarIdxLap": [lap + 1, lap + 1],
+            "CarIdxLapDistPct": [pct, pct - gap / 90.0],
+            "CarIdxEstTime": [mine, mine - gap],
+        })
+        r.values.update((events or {}).get(n, {}))
+        r._update_gap_rates()
+
+
+def _two_car_gap_reader():
+    return _Reader({"PlayerCarIdx": 0, "SessionNum": 0, "SessionState": 4,
+                    "LapBestLapTime": 90.0, "CarIdxOnPitRoad": [False, False]}, {
+        "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]},
+        "DriverInfo": {"Drivers": [
+            _driver(0, "You", 1, "Cup", 1, "Car", "Car"),
+            _driver(1, "Rossi", 1, "Cup", 1, "Car", "Car")]},
+    })
+
+
+def test_the_gap_is_measured_lap_on_lap_at_the_same_point():
+    """2.0 s back and taking two tenths a lap: the same gate a lap apart
+    says so exactly, with no lap times involved."""
+    r = _two_car_gap_reader()
+    _gate_by_gate(r, range(60), lambda n: 2.0 - 0.2 * n / 20)
+    rate, pairs = r._gap_rate(1)
+    assert rate == 0.2 and pairs == 40
+
+
+def test_a_stop_or_a_caution_starts_the_measurement_again():
+    r = _two_car_gap_reader()
+    _gate_by_gate(r, range(40), lambda n: 2.0,
+                  {30: {"CarIdxOnPitRoad": [False, True]}})
+    assert r._gap_rate(1)[1] < 10                      # rebuilt since gate 30
+
+    # Caution from gate 35, green again at 40: nothing under it is kept, so
+    # a lap later there is still nothing a lap old to compare with.
+    r = _two_car_gap_reader()
+    _gate_by_gate(r, range(60), lambda n: 2.0,
+                  {35: {"SessionFlags": 0x00004000}, 40: {"SessionFlags": 0}})
+    assert r._gap_rate(1) == (None, 0)
+
+
+def test_an_optimal_slower_than_the_best_is_not_given():
+    """Four recorded sessions ended with a stale "optimal" over the best —
+    Bathurst 2:08.200 against 2:06.789. No optimal can be slower."""
+    r = _Reader({})
+    r._stored_laps = {"best": 126.789, "optimal": 128.200}
+    assert r._stored_optimal() is None
+    r._stored_laps = {"best": 125.445, "optimal": 124.406}
+    assert r._stored_optimal() == 124.406
+
+
+def _mexico_race(**values):
+    """Mexico City, 2 November: a 15-minute race, iRacing's estimate for the
+    car 1:42.551, laps driven 1:46-1:48 after a 1:59.06 standing start."""
+    return _Reader({"PlayerCarIdx": 0, "SessionNum": 0, "SessionState": 4,
+                    "LapDistPct": 0.3, **values}, {
+        "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race",
+                                      "SessionTime": "900.0000 sec"}]},
+        "DriverInfo": {"DriverCarEstLapTime": 102.5508, "Drivers": [
+            _driver(0, "You", 1, "Formula", 148, "Car", "Car",
+                    CarClassEstLapTime=102.5508)]},
+    })
+
+
+def test_a_timed_race_has_laps_to_go_before_the_first_lap_is_done():
+    """A minute in, nothing timed: "I can't see how many laps are left" was
+    the answer. iRacing's estimate for the car gives a count, as an estimate."""
+    reader = _mexico_race()
+    assert reader._representative_lap() == 102.5508
+    laps_to_go, _, _ = reader._strategy(0.87, None, TrackConfig(time_remaining=840.0))
+    assert laps_to_go is not None
+
+
+def test_the_standing_start_lap_does_not_shrink_the_race():
+    """1:59.06 off the grid fits a lap fewer into the clock than the car
+    does, and a lap less fuel. The quicker stand-in is used until a clean lap."""
+    reader = _mexico_race(LapLastLapTime=119.06)
+    assert reader._representative_lap() == 102.5508
+    assert reader._clean_pace() is None
+
+    for n, time in enumerate((107.0, 108.0, 106.0), start=2):
+        reader._laps.append(LapRecord(lap=n, time=time))
+    assert reader._representative_lap() == 107.0
+    assert reader._clean_pace() == 107.0
 
 
 def _lap_poll(r, **values):

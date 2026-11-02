@@ -22,6 +22,7 @@ from .audio_handler import (
 from . import keyterms
 from .config import AppConfig
 from .ducking import AudioDuck
+from .fuel_statement import parse_stated_burn
 from .input_handler import InputUnavailable, PushToButton
 from .llm import COMMS_FAILURE, NO_ANSWER, LLMClient
 from .radio_log import FILE_NAME as RADIO_LOG_FILE, RadioLog
@@ -922,14 +923,15 @@ class Orchestrator:
             self._adopt_session(snapshot)
             self._remember_trace_sample(snapshot)
 
-            pit_result = await self._handle_pit_command(question)
+            pit_result = (self._handle_fuel_statement(question, snapshot)
+                          or await self._handle_pit_command(question))
             if pit_result is not None:
                 answer, route = pit_result
                 entry = self._log_exchange(question, answer, kind, snapshot,
                                            _transcription, route)
                 self._write_diagnostic_trace(
                     question, answer, kind, snapshot, _transcription, route)
-                logger.info("Pit command route %s: %r", route, answer)
+                logger.info("Command route %s: %r", route, answer)
                 self._last_error = None
                 if speak and self.tts.configured and audio_available():
                     self._status = "speaking"
@@ -969,6 +971,28 @@ class Orchestrator:
             self._status = "listening" if self._running else "stopped"
             if acquired:
                 self._busy.release()
+
+    def _handle_fuel_statement(
+        self, question: str, snapshot: Optional[TelemetrySnapshot]
+    ) -> Optional[tuple[str, str]]:
+        """"Plan on 3.2 litres a lap": hold the driver's burn and read it back.
+
+        Before the pit commands, because the same words — a number of litres
+        — also look like a pit instruction, and went to the pit classifier.
+        The read-back is the driver's only check that it was heard right.
+        """
+        parsed = parse_stated_burn(question)
+        if parsed is None:
+            return None
+        value, unit = parsed
+        if self.telemetry.set_stated_fuel_burn(value, unit) is None:
+            return ("Say again the fuel figure — that's not a lap's worth.",
+                    "fuel_statement")
+        if unit is None:
+            unit = getattr(getattr(snapshot, "car", None), "fuel_unit", None) or "litres"
+        figure = f"{value:g}"
+        return (f"Copy, planning on {figure} {unit} a lap until I've measured "
+                "two laps of my own.", "fuel_statement")
 
     def _clear_pending_pit_command(self) -> None:
         self._pending_pit_command = None

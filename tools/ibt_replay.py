@@ -62,6 +62,8 @@ FIXTURE_CHANNELS = (
     "FuelLevel", "FuelLevelPct", "OnPitRoad", "PlayerCarInPitStall",
     "PlayerTrackSurface", "PlayerCarTowTime", "PlayerCarPosition",
     "PlayerCarClassPosition", "PlayerCarIdx", "Speed", "IsOnTrack",
+    "LapDeltaToBestLap", "LapDeltaToBestLap_OK",
+    "LapDeltaToOptimalLap", "LapDeltaToOptimalLap_OK",
 )
 
 #: Lap time is read this long after the line: LapLastLapTime has been seen
@@ -218,7 +220,9 @@ def check(source: IbtSource, step: int = 6) -> Dict[str, Any]:
             problems.append(f"sector {n + 1} best {best:.3f}s is not a sector")
 
     return {"laps": len(reader._laps), "problems": problems,
-            "session_type": snapshot.track.session_type if snapshot else ""}
+            "session_type": snapshot.track.session_type if snapshot else "",
+            "stored_best": snapshot.car.stored_best_lap if snapshot else None,
+            "stored_optimal": snapshot.car.stored_optimal_lap if snapshot else None}
 
 
 def extract(source: IbtSource, start: float, seconds: float, out: Path,
@@ -286,8 +290,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         source.close()
         name = Path(path).name
         status = "ok" if not result["problems"] else f"{len(result['problems'])} problems"
+        reference = ""
+        if result.get("stored_best"):
+            optimal = result.get("stored_optimal")
+            reference = (f", stored best {result['stored_best']:.3f}"
+                         f" optimal {f'{optimal:.3f}' if optimal else '-'}")
         print(f"{name}: {result.get('session_type', '')}, "
-              f"{result['laps']} laps, {status}")
+              f"{result['laps']} laps{reference}, {status}")
         for problem in result["problems"]:
             print(f"    {problem}")
         failed += bool(result["problems"])

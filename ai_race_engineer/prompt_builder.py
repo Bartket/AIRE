@@ -322,7 +322,8 @@ class PromptBuilder:
                 f"- Best lap: {_laptime(car.best_lap_time, _lap_digits(track))}"
                 f" | Last lap: {_laptime(car.last_lap_time, _lap_digits(track))}"
                 f" | This lap so far: "
-                f"{_laptime(car.current_lap_time, _lap_digits(track))}",
+                f"{_laptime(car.current_lap_time, _lap_digits(track))}"
+                + _stored_laps(car, track),
                 _weather(car),
             ]
             + _fixed_setup(track)
@@ -436,6 +437,24 @@ def _signed(value, unit: str = "s") -> str:
     if value is None:
         return UNKNOWN
     return f"{value:+.3f}{unit}"
+
+
+def _stored_laps(car, track) -> str:
+    """The stored best and optimal for this car here, when known.
+
+    Labelled as what it is: iRacing never stores a race lap there, so it is
+    the best outside a race, not the best ever.
+    """
+    best = getattr(car, "stored_best_lap", None)
+    if not best:
+        return ""
+    text = (f" | Best here outside a race, from your data on earlier sessions"
+            f" (say \"my data\", never name the sim):"
+            f" {_laptime(best, _lap_digits(track))}")
+    optimal = getattr(car, "stored_optimal_lap", None)
+    if optimal:
+        text += f", optimal {_laptime(optimal, _lap_digits(track))}"
+    return text
 
 
 def _delta_line(car, track) -> str:
@@ -766,10 +785,32 @@ def _fuel_line(car) -> str:
         if burn_low is not None and burn_high is not None:
             bits.append(f"{burn_samples} clean-lap samples span "
                         f"{_num(burn_low, 2)} to {_num(burn_high, 2)} {car.fuel_unit}")
+    # Before a lap is measured, what the fuel calculator plans on instead —
+    # labelled with its source, so it is never spoken as today's figure.
+    stated = getattr(car, "fuel_burn_stated", None)
+    history = getattr(car, "fuel_history_per_lap", None)
+    planned = None
+    if car.fuel_per_lap is None and stated:
+        planned = (f"no burn measured yet; the DRIVER TOLD YOU {_num(stated, 2)}"
+                   f" {car.fuel_unit} per lap — call it their figure")
+    elif car.fuel_per_lap is None and history:
+        planned = (f"no burn measured yet; YOUR DATA FROM EARLIER RUNS of this car on"
+                   f" this track is {_num(history, 2)} {car.fuel_unit} per lap"
+                   f" ({_num(car.fuel_history_min, 2)} to"
+                   f" {_num(car.fuel_history_max, 2)} over"
+                   f" {car.fuel_history_samples} laps) — call it \"my data\", not"
+                   " today's, and never name the sim")
+    if planned:
+        bits.append(planned)
     if car.fuel_used_stint:
         bits.append(f"{_num(car.fuel_used_stint, 1)} used this stint")
     if car.fuel_remaining_laps is not None:
         bits.append(f"~{_num(car.fuel_remaining_laps, 1)} laps of fuel left")
+    elif planned:
+        bits.append("LAPS OF FUEL LEFT: NOT MEASURED YET. The fuel calculator"
+                    " projects it from the figure above; never estimate it"
+                    " yourself, and do not read the laps remaining in this block"
+                    " as fuel range")
     else:
         bits.append("LAPS OF FUEL LEFT: NOT MEASURED YET — no such figure exists."
                     " Say you cannot call the fuel yet. Do not estimate one, and"

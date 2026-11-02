@@ -127,6 +127,12 @@ class Rival:
     # value comes from CarIdxEstTime and is sampled only at comparable points
     # around the lap.
     trend_gap: Optional[float] = None
+    # How much the gap to this car shrinks a lap, measured at the same points
+    # on the lap one lap apart — positive when it closes, whichever car is
+    # doing the catching. `gap_rate_pairs` is how many of those comparisons
+    # it is the mean of; see the reader's _update_gap_rates().
+    gap_rate_per_lap: Optional[float] = None
+    gap_rate_pairs: int = 0
     position: Optional[int] = None
     laps_down: int = 0        # negative = they are a lap ahead
     best_lap: Optional[float] = None
@@ -357,6 +363,15 @@ class CarTelemetry:
     fuel_burn_samples: int = 0
     fuel_burn_min: Optional[float] = None
     fuel_burn_max: Optional[float] = None
+    # What to plan on before a lap of this session is measured: iRacing's own
+    # fuel history for this car on this track (fueldata.ini, its last ten
+    # laps here) and the figure the driver gave on the radio. Both in the
+    # driver's fuel units; race_math._fuel_burn_bounds decides which is used.
+    fuel_history_per_lap: Optional[float] = None
+    fuel_history_min: Optional[float] = None
+    fuel_history_max: Optional[float] = None
+    fuel_history_samples: int = 0
+    fuel_burn_stated: Optional[float] = None
     # Measurement: what actually happened, filtered by nothing. Under a
     # safety car these diverge, and the difference is the useful part.
     fuel_last_lap: Optional[float] = None
@@ -451,6 +466,11 @@ class CarTelemetry:
     # The lap time the reader converts clocks into laps with: the mean of
     # the recent clean laps. See race_math.pace_lap().
     pace_lap: Optional[float] = None
+    # iRacing's stored best and optimal lap for this car on this track — the
+    # laps its delta bar measures against, kept across sessions. Derived
+    # from the delta channels; None until two laps agree on them.
+    stored_best_lap: Optional[float] = None
+    stored_optimal_lap: Optional[float] = None
     fast_repair_used: Optional[int] = None
     fast_repair_available: Optional[int] = None
     pit_service_pending: bool = False
@@ -537,6 +557,16 @@ class TelemetryAdapter(ABC):
     def apply_pit_commands(self, commands: Sequence[Any]) -> Tuple[bool, str]:
         """Apply already-confirmed commands and verify their resulting state."""
         return False, "pit commands are not supported by this telemetry source"
+
+    def set_stated_fuel_burn(self, value: float,
+                             unit: Optional[str] = None) -> Optional[float]:
+        """Hold the driver's own burn figure for this session.
+
+        `unit` is litres, kilograms or gallons; None means the unit the
+        driver's fuel is reported in. Returns the figure in litres, or None
+        when it is not a plausible burn or this source cannot hold one.
+        """
+        return None
 
     # ── Diagnostics ─────────────────────────────────────────────────
     #

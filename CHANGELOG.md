@@ -8,6 +8,24 @@ Entries are grouped under **Added**, **Changed**, **Fixed**, or **Removed**.
 
 ### Added
 
+- **Fuel calls from the first lap.** Before two clean laps are measured, the
+  engineer plans on your data from earlier runs of the car on this track —
+  the `fueldata.ini` iRacing's fuel calculator keeps — and says so (*“From my
+  data on this car here, …”*). The engineer calls it "my data" and does not
+  name the sim. Or tell it: *“plan on 3.2 litres a lap”* — it reads the
+  figure back and holds it for the session. Once its own laps are measured
+  they take over, and it tells you if they differ by more than 5 %.
+- **What to put in.** *“How much fuel do I need?”* gets the amount to add to
+  reach the end, a lap more in a timed race, never more than fits.
+- **Your best here.** *“What's my best here?”* gives your best and optimal
+  lap on this track in this car from earlier sessions — the laps iRacing's
+  delta bar uses — against your pace now. It is your best *outside a race*:
+  race laps are never stored there, so a quicker lap today, race laps
+  included, is said beside it.
+- **Catching is measured from the gap.** Who catches whom now comes from how
+  much the gap moved between the same points on the track a lap apart, which
+  works about a lap and a half into a fight; the three-clean-laps pace is the
+  fallback. *“Am I gaining?”* adds the lap-on-lap rate once it is measured.
 - **Driver profiles**, for a rig more than one person drives. The switcher at
   the top of the sidebar swaps what belongs to a person: what the engineer
   calls you, the system prompt, the voice and its delivery, pronunciations,
@@ -195,6 +213,16 @@ Found by replaying 53 recorded iRacing sessions (`.ibt` files) through the
 telemetry reader and comparing with the 60 Hz recording. `tools/ibt_replay.py`
 does that replay.
 
+- *“What is my fuel consumption per lap?”* was answered *“I don't know how
+  many laps are left”* — after the flag, or whenever the lap count was
+  unknown. The burn needs no lap count; it is answered first now.
+- Before the green in a timed race, laps to go came from the gridding
+  countdown, not the race length; and until a clean lap was done there was no
+  lap count at all, then one from the standing-start lap, which planned a lap
+  too little fuel. The quicker of that lap and iRacing's estimated lap time
+  for the car is used now.
+- A burn question before a measured lap ran to 35 words. It is the burn and
+  the tank, about 20.
 - **Every lap was logged with the lap before's time.** iRacing updates the
   last lap time up to 2.1 s after the lap count, and the reader read it on
   the count: 173 of 178 recorded laps were wrong. Pace trends, the race

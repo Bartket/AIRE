@@ -468,3 +468,16 @@ def test_rain_is_written_with_its_unit():
 
     line = _weather(_car(rain_intensity=15.0))
     assert "rain 15%" in line
+
+
+def test_before_a_lap_is_measured_the_planned_burn_is_labelled_by_source():
+    history = _fuel_line(_unmeasured(fuel_history_per_lap=0.87, fuel_history_min=0.85,
+                                     fuel_history_max=0.88, fuel_history_samples=10))
+    assert "YOUR DATA FROM EARLIER RUNS" in history and "0.87 litres per lap" in history
+    assert "iRacing" not in history
+    assert "Say you cannot call the fuel yet" not in history
+
+    stated = _fuel_line(_unmeasured(fuel_burn_stated=2.5,
+                                    fuel_history_per_lap=0.87))
+    assert "DRIVER TOLD YOU 2.50 litres per lap" in stated
+    assert "EARLIER RUNS" not in stated

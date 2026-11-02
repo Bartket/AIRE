@@ -236,8 +236,8 @@ diagnostic trace in a public issue.
 | --- | --- |
 | **Position** | Live on-track order (not just the last start/finish crossing), class position, full running order with gaps |
 | **Rivals** | Names, car numbers, timing gaps in seconds, the distance in metres when it is to that car, laps down, who is in the pits |
-| **Pace** | Lap times as `m:ss.mmm`, best, last, rolling average, delta to your best and to the session best, and the trend across recent clean laps |
-| **Fuel** | Volume on board, measured burn per clean lap, range, and whether it reaches the end — in litres, kilograms or gallons to match your dash |
+| **Pace** | Lap times as `m:ss.mmm`, best, last, delta to your best and to the session best, the trend across recent clean laps, and your stored best and optimal lap on this track in this car |
+| **Fuel** | Volume on board, measured burn per clean lap — or, before one is measured, iRacing's own fuel history for the car here or the figure you gave — range, whether it reaches the end and what to put in — in litres, kilograms or gallons to match your dash |
 | **Tyres** | Tread and carcass temperature across three strips per tyre, wear, age |
 | **Car** | Repair seconds outstanding, tow state, fast repairs left, dashboard warning lights, engine temps and pressures |
 | **Session** | Type, state, laps or time remaining, flags, incident count and limit |
@@ -283,10 +283,15 @@ Phrasing does not matter — these are examples, not commands.
 > me before the end? · Can I hold position to the flag? · Will Silva catch
 > me? · How much quicker is Silva? · Is the car behind faster than me?
 
-Whether a car catches you is worked out from the last three clean laps each
-of you has done, not from best laps. A car that spun keeps its best lap but
-is quicker now, and a damaged car is slower than its best. Pit, off-track and
-caution laps are left out. The answer is a lap count against the laps left:
+Whether a car catches you is worked out from the gap itself: how much it
+moved between the same points on the track one lap apart. That needs about a
+lap and a half behind the same car. Until then it uses the last three clean
+laps each of you has done, never best laps — a car that spun keeps its best
+lap but is quicker now, and a damaged car is slower than its best. Pit,
+off-track and caution laps are left out of both, and a stop or a caution
+starts the measuring again. iRacing itself works out no closing rate; its
+relative box shows the gap and leaves the rest to you. The answer is a lap
+count against the laps left:
 "catches you in about 6 laps, 9 to go", "right at the flag", or "runs out of
 laps, a second short". With no car named it looks at the next three cars
 racing you for the place, so with damage you can tell whether staying out
@@ -294,7 +299,8 @@ keeps the position; it adds the repair time iRacing reports, but it does not
 say whether to pit, because what a stop costs is not published. "Catch" means
 the gap closes, not that he gets by. Before there are three clean laps, and
 outside a race, you get what the gap is doing right now. "Am I gaining?" and
-"is the gap closing?" always get that live trend.
+"is the gap closing?" always get that live trend, and once it is measured,
+how much the gap is moving lap on lap.
 
 **Asking about one car** — by name, position, number, or just "ahead"
 > What's the car ahead's last lap? · What's P4's best? · How's Silva doing? ·
@@ -309,7 +315,31 @@ not enough to name every rival's tyres safely in a mixed-car field.
 **Fuel and strategy**
 > Can we make the end on fuel? · When's my pit window? · How much do I need
 > to save? · How many laps of fuel have I got? · How much fuel for the next
-> twenty minutes?
+> twenty minutes? · What's my fuel consumption per lap? · How much fuel do I
+> need to the end?
+
+Before the engineer has measured two clean laps of its own, it plans on what
+it has, and says which: your data from earlier runs of this car on this
+track (`Documents\iRacing\fueldata.ini`, which iRacing keeps for its fuel
+calculator — on the radio it is "my data"), or a figure you give it. In a
+timed race with no clean lap yet, the clock is turned into laps with the
+quicker of the last lap and iRacing's estimated lap time for the car, which
+errs towards a lap more fuel, never less. Say *“plan on 3.2 litres a lap”* or
+*“I'm using two and a half litres per lap”* and it reads the figure back. It
+holds it for the session, and tells you if what it then measures is more
+than 5 % different. Measured laps always take over.
+
+**Pace you can do here**
+> What's my best here? · How far off my best am I? · What pace can I do?
+
+Your best and optimal lap come from the laps iRacing's delta bar measures
+against, kept across sessions. They show after two clean laps. They are your
+best **outside a race**: across 54 recorded sessions a race lap never went
+into them — a 1:45.450 in a race at Mexico City left the stored best at
+1:46.481 — while practice and test laps did. Whether a qualifying lap does is
+not known. When today's best, race laps included, is quicker, the engineer
+says so and measures your pace against that instead. On the radio all of
+this is "my data"; the engineer does not name the sim.
 
 ### Pit stop commands: opt-in, at your own risk
 

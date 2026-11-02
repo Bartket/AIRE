@@ -105,3 +105,17 @@ def test_a_quick_answer_waits_like_an_engineer_and_a_slow_one_does_not(
     assert "pause" not in orch._timings.as_dict()
     config.audio["min_reply_seconds"] = "soon"
     assert orch._min_reply_seconds() == 1.5
+
+
+def test_a_consumption_question_is_answered_without_the_model():
+    """Asked three times after a race and answered by way of the model with
+    "I don't know how many laps are left". The burn needs no model and no
+    lap count."""
+    from ai_race_engineer.llm import _direct_telemetry_answer
+    from ai_race_engineer.telemetry.simulated import SimulatedTelemetryAdapter
+
+    snapshot = SimulatedTelemetryAdapter().get_telemetry_snapshot()
+    for question in ("What is my fuel consumption per lap?",
+                     "Fuel consumption per lap"):        # as asked, 2 Nov 02:22
+        answer = _direct_telemetry_answer(question, snapshot)
+        assert answer and answer.startswith("You're using 2.4 litres a lap"), question

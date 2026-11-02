@@ -47,7 +47,7 @@ _MAX_TOOL_ROUNDS = 2
 # answer, not material for another model pass.
 _TERMINAL_TOOLS = {"fuel_plan", "pit_window", "position_report",
                    "adjacent_gap_trend", "car_resources", "race_control_report",
-                   "catch_projection"}
+                   "catch_projection", "pace_reference"}
 # Headroom for emitting a tool call, which does not fit the speech budget.
 _TOOL_CALL_TOKENS = 512
 # Room for a reasoning model to think *and* still answer. The speech budget
@@ -155,6 +155,16 @@ def _direct_telemetry_answer(
         "do i have enough fuel", "have i got enough fuel",
         "can i make it on fuel", "will the fuel last", "will fuel last",
         "are we good on fuel", "am i good on fuel",
+        # Asked on the radio, 2 November 2026, and three times answered "I
+        # don't know how many laps are left" by way of the model.
+        "what is my fuel consumption per lap", "what was my fuel consumption per lap",
+        "what was my fuel usage per lap this race", "whats my fuel consumption",
+        "what is my fuel consumption", "fuel consumption", "fuel usage",
+        "fuel consumption per lap", "fuel usage per lap", "consumption per lap",
+        "consumption",
+        "fuel per lap", "whats my fuel per lap", "how much fuel am i using",
+        "how much fuel per lap", "how much fuel do i need",
+        "how much fuel do i need to the end", "how much fuel do i need to finish",
     }
     if normalised in fuel_phrases:
         return race_math.fuel_radio(

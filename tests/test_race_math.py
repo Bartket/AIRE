@@ -3223,6 +3223,10 @@ def test_every_fuel_clause_is_either_on_the_radio_or_deliberately_not():
         (CarTelemetry(fuel_level=5.0, fuel_capacity=6.0, fuel_per_lap=3.4,
                       fuel_burn_samples=6, fuel_burn_min=3.2,
                       fuel_burn_max=3.7, avg_lap_time=92.0), lap_limited, {}),
+        # Burning well over the earlier runs of the car here.
+        (CarTelemetry(**short, fuel_history_per_lap=3.0, fuel_history_min=2.9,
+                      fuel_history_max=3.1, fuel_history_samples=10),
+         lap_limited, {}),
     ):
         reachable |= set((rm.fuel_plan(car, track, **kwargs)
                           .get("clauses") or {}).keys())
@@ -3231,8 +3235,11 @@ def test_every_fuel_clause_is_either_on_the_radio_or_deliberately_not():
         "the radio asks for a clause fuel_plan never produces"
     # Spoken only when the model is doing the talking: the stop count already
     # carries the decision, and the burn rate was not what was asked. The tank
-    # amount is said when the question asks how much — see `fuel_radio`.
-    assert reachable - set(rm._FUEL_RADIO_ORDER) == {"burn", "verdict", "tank"}
+    # amount is said when the question asks how much, and the burn rate when
+    # it asks what the car uses, and the amount to add when it asks what to
+    # put in — see `fuel_radio`.
+    assert reachable - set(rm._FUEL_RADIO_ORDER) == {
+        "burn", "verdict", "tank", "burn_rate", "add"}
 
 
 # ── "Status": the place, the gaps, and only what needs acting on ─────
@@ -3764,3 +3771,244 @@ def test_a_lap_count_is_only_called_an_estimate_when_it_is_one():
     track.laps_remaining, track.time_remaining = None, 910.0
     car.avg_lap_time = 91.0
     assert "about 10 to go" in rm.catch_projection(car, track)["spoken"]
+
+
+# ── The burn needs no lap count ────────────────────────────────────
+
+_LOGGED_BURN_QUESTIONS = (
+    # Asked on the radio after the flag, 2 November 2026. All three were
+    # answered "I don't know how many laps are left, so I can't call the fuel."
+    "What is my fuel consumption per lap?",
+    "What was my fuel consumption per lap?",
+    "What was my fuel usage per lap this race?",
+)
+
+
+def _measured_formula_car(**kw):
+    base = dict(fuel_unit="litres", fuel_level=5.9, fuel_per_lap=0.85,
+                fuel_burn_samples=5, fuel_burn_min=0.83, fuel_burn_max=0.87)
+    base.update(kw)
+    return CarTelemetry(**base)
+
+
+def test_the_burn_is_answered_after_the_flag():
+    track = TrackConfig(session_type="Race", session_state="CoolDown",
+                        finished=True)
+    for question in _LOGGED_BURN_QUESTIONS:
+        answer = rm.fuel_radio(rm.fuel_plan(_measured_formula_car(), track), question)
+        assert "0.85 litres a lap" in answer, question
+        assert "laps are left" not in answer
+
+
+def test_the_burn_is_answered_when_the_laps_left_are_unknown():
+    """Mid-race with no lap count: the range and the burn, and the honest
+    note that the finish cannot be measured against."""
+    track = TrackConfig(session_type="Race", session_state="Racing")
+    result = rm.fuel_plan(_measured_formula_car(), track)
+    assert result["available"]
+    assert "about 6 laps of fuel" in result["spoken"]
+    assert "can't see how many laps are left" in result["spoken"]
+    answer = rm.fuel_radio(result, _LOGGED_BURN_QUESTIONS[0])
+    assert answer.startswith("You're using 0.85 litres a lap")
+
+
+def test_a_verdict_question_is_not_led_by_the_burn():
+    track = TrackConfig(session_type="Race", laps_remaining=3)
+    result = rm.fuel_plan(_measured_formula_car(), track)
+    assert not rm.fuel_radio(result, "How's my fuel?").startswith("You're using")
+
+
+# ── Before a lap is measured: the driver's figure, then earlier runs ──
+
+def _unmeasured_car(**kw):
+    base = dict(fuel_unit="litres", fuel_level=13.7, fuel_capacity=40.0,
+                fuel_per_lap=None, fuel_burn_samples=0)
+    base.update(kw)
+    return CarTelemetry(**base)
+
+
+_HISTORY = dict(fuel_history_per_lap=0.87, fuel_history_min=0.85,
+                fuel_history_max=0.88, fuel_history_samples=10)
+
+
+def test_iracing_history_answers_before_a_lap_is_measured():
+    """Three times in one race: "I haven't measured a racing-lap burn yet",
+    at 13.7 litres, with ten laps of the car at that track in fueldata.ini."""
+    track = TrackConfig(session_type="Race", laps_remaining=12)
+    result = rm.fuel_plan(_unmeasured_car(**_HISTORY), track)
+
+    assert result["strategy_available"] is True
+    assert result["fuel_source"] == "history"
+    assert result["spoken"].startswith("From my data on this car here,")
+    assert result["burn_per_lap_high"] == 0.88
+
+
+def test_the_drivers_figure_beats_history_and_is_said_back_as_theirs():
+    track = TrackConfig(session_type="Race", laps_remaining=12)
+    result = rm.fuel_plan(_unmeasured_car(fuel_burn_stated=2.5, **_HISTORY), track)
+
+    assert result["fuel_source"] == "stated"
+    assert result["spoken"].startswith("On your 2.5 litres a lap,")
+    assert result["burn_per_lap"] == 2.5
+    answer = rm.fuel_radio(result, "What's my fuel consumption per lap?")
+    assert answer.startswith("You told me 2.5 litres a lap")
+
+
+def test_measured_laps_win_and_a_different_burn_is_called_out():
+    """The driver planned on 3.2; the car is using 3.4. That is the call."""
+    car = _car(fuel_level=40.0, fuel_per_lap=3.4, fuel_burn_samples=5,
+               fuel_burn_min=3.35, fuel_burn_max=3.45, fuel_burn_stated=3.2)
+    track = TrackConfig(session_type="Race", laps_remaining=10)
+    result = rm.fuel_plan(car, track)
+
+    assert result["fuel_source"] == "measured"
+    assert not result["spoken"].startswith("On your")
+    assert "more than the 3.2 you planned on" in result["clauses"]["usual"]
+
+
+def test_a_burn_within_five_percent_of_the_plan_is_not_news():
+    car = _car(fuel_level=40.0, fuel_per_lap=3.25, fuel_burn_samples=5,
+               fuel_burn_min=3.2, fuel_burn_max=3.3, fuel_burn_stated=3.2)
+    result = rm.fuel_plan(car, TrackConfig(session_type="Race", laps_remaining=10))
+    assert "usual" not in result["clauses"]
+
+
+def test_what_to_put_in_covers_the_finish_and_fits_the_tank():
+    """10 laps at a worst 3.5 is 35 L against 13.7 on board: 21.3 to add."""
+    car = _car(fuel_level=13.7, fuel_capacity=100.0, fuel_per_lap=3.4,
+               fuel_burn_samples=5, fuel_burn_min=3.3, fuel_burn_max=3.5)
+    track = TrackConfig(session_type="Race", laps_remaining=10)
+    result = rm.fuel_plan(car, track)
+    assert result["fuel_to_add"] == 21.3
+    assert rm.fuel_radio(result, "How much fuel do I need?").startswith(
+        "Take 21.3 litres to get to the end.")
+
+    small = _car(fuel_level=13.7, fuel_capacity=20.0, fuel_per_lap=3.4,
+                 fuel_burn_samples=5, fuel_burn_min=3.3, fuel_burn_max=3.5)
+    assert rm.fuel_plan(small, track)["fuel_to_add"] == 6.3     # what fits
+
+
+def test_a_timed_race_puts_in_a_lap_more():
+    """The clock sets the distance, so the lap count can grow by one."""
+    car = _car(fuel_level=10.0, fuel_capacity=100.0, fuel_per_lap=3.4,
+               fuel_burn_samples=5, fuel_burn_min=3.3, fuel_burn_max=3.5,
+               laps_to_go=10.0, laps_to_go_is_estimate=True)
+    track = TrackConfig(session_type="Race", time_remaining=900.0)
+    assert rm.fuel_plan(car, track)["fuel_to_add"] == 28.5     # 11 x 3.5 - 10
+
+
+# ── iRacing's stored best and optimal lap ─────────────────────────
+
+def test_the_stored_best_says_what_pace_is_possible_here():
+    """Bathurst, Porsche Cup: stored best 2:05.445, optimal 2:04.407 — the
+    figures the recorded sessions give — against a 2:07.6 average."""
+    car = CarTelemetry(stored_best_lap=125.445, stored_optimal_lap=124.407,
+                       pace_lap=127.6, best_lap_time=126.9)
+    track = TrackConfig(session_type="Race")
+    result = rm.pace_reference(car, track)
+    assert result["spoken"] == ("Your best here outside a race is 2:05.4, optimal "
+                                "2:04.4; you're averaging 2:07.6, 2.2 seconds off.")
+    assert result["off_stored_best"] == 2.155
+
+
+def test_no_stored_best_is_not_guessed_from_todays_laps():
+    car = CarTelemetry(best_lap_time=126.9)
+    result = rm.pace_reference(car, TrackConfig(session_type="Practice"))
+    assert not result["available"]
+    assert "stored best" in result["spoken"] and "2:06.90" in result["spoken"]
+
+
+# ── Closing measured from the gap itself ──────────────────────────
+
+def test_a_measured_gap_rate_projects_before_three_clean_laps_exist():
+    """Out of the pits, or a lap after the start, nobody has three clean
+    laps — and that is when the fights start. The gap measured at the same
+    points a lap apart needs one lap and a half behind the same car."""
+    novak = _chaser("Novak", 3, 3.0, [], gap_rate_per_lap=0.5, gap_rate_pairs=20)
+    car, track = _chase(novak, my_laps=())
+
+    result = rm.catch_projection(car, track, "Novak")
+    row = result["cars"][0]
+    assert row["closing_basis"] == "measured gap"
+    assert row["laps_to_catch"] == 6.0 and row["verdict"] == "catches"
+    assert result["your_pace"] is None
+
+
+def test_the_measured_gap_wins_over_lap_times_when_both_exist():
+    """Lap times say Novak is half a second quicker; the gap itself says it
+    is coming down a tenth a lap. The gap is the thing being projected."""
+    novak = _chaser("Novak", 3, 3.0, [91.0, 91.0, 91.0],
+                    gap_rate_per_lap=0.1, gap_rate_pairs=20)
+    car, track = _chase(novak)
+    row = rm.catch_projection(car, track, "Novak")["cars"][0]
+    assert row["closing_basis"] == "measured gap"
+    assert row["verdict"] == "holds"
+
+
+def test_too_few_comparisons_fall_back_to_lap_times():
+    novak = _chaser("Novak", 3, 3.0, [91.0, 91.0, 91.0],
+                    gap_rate_per_lap=0.1, gap_rate_pairs=5)
+    car, track = _chase(novak)
+    row = rm.catch_projection(car, track, "Novak")["cars"][0]
+    assert row["closing_basis"] == "lap times" and row["verdict"] == "catches"
+
+
+def test_am_i_gaining_adds_the_lap_on_lap_rate():
+    rossi = Rival(name="Rossi", car_number="13", gap=1.2, position=1,
+                  gap_rate_per_lap=0.2, gap_rate_pairs=20)
+    car = _car(ahead=rossi, closing_ahead_status="steady",
+               closing_ahead_seconds=12.0, closing_ahead_change=0.0,
+               closing_ahead_segments=3)
+    track = TrackConfig(session_type="Race", field=[rossi])
+    result = rm.adjacent_gap_trend(car, track, "ahead")
+    assert result["spoken"].endswith(
+        "Lap on lap the gap is closing 2 tenths of a second a lap.")
+
+
+def test_a_burn_question_before_a_measured_lap_is_one_short_answer():
+    """Asked in a race on 2 November with nothing measured yet, it came back
+    labelled twice, with a note nobody asked for: 35 words, 15 s of radio."""
+    car = _unmeasured_car(fuel_level=13.6, fuel_history_per_lap=0.87,
+                          fuel_history_min=0.85, fuel_history_max=0.88,
+                          fuel_history_samples=10)
+    track = TrackConfig(session_type="Race", session_state="Racing")
+    answer = rm.fuel_radio(rm.fuel_plan(car, track), "Fuel consumption per lap")
+    assert answer == ("My data has this car on 0.87 litres a lap here. You've got "
+                      "13.6 litres on board, about 15 laps of fuel.")
+    assert len(answer.split()) <= rm.SPOKEN_BUDGET_WORDS
+
+
+def test_no_fuel_answer_names_the_sim():
+    """Data from earlier runs is "my data" on the radio, whatever the source."""
+    history = dict(fuel_history_per_lap=0.87, fuel_history_min=0.85,
+                   fuel_history_max=0.88, fuel_history_samples=10)
+    cases = [
+        (_unmeasured_car(**history), TrackConfig(session_type="Race", laps_remaining=12)),
+        (_unmeasured_car(**history), TrackConfig(session_type="Race")),
+        (_unmeasured_car(**history), TrackConfig(session_type="Practice")),
+        (_car(fuel_level=30.0, fuel_per_lap=1.0, fuel_burn_samples=5,
+              fuel_burn_min=0.95, fuel_burn_max=1.05, **history),
+         TrackConfig(session_type="Race", laps_remaining=12)),
+    ]
+    for car, track in cases:
+        for fn in (rm.fuel_plan, rm.pit_window, rm.stint_projection):
+            result = fn(car, track)
+            spoken = " ".join([result.get("spoken", "")]
+                              + list((result.get("clauses") or {}).values()))
+            assert "iRacing" not in spoken, (fn.__name__, spoken)
+        for question in ("Fuel consumption per lap", "How much fuel do I need?"):
+            assert "iRacing" not in rm.fuel_radio(rm.fuel_plan(car, track), question)
+
+
+def test_a_race_lap_quicker_than_the_stored_best_is_said():
+    """Mexico City, 31 October: 1:45.450 in the race, and the stored best
+    still 1:46.481 — race laps never go into it."""
+    car = CarTelemetry(stored_best_lap=106.481, pace_lap=106.9, best_lap_time=105.45)
+    spoken = rm.pace_reference(car, TrackConfig(session_type="Race"))["spoken"]
+    assert spoken == ("Your best here outside a race is 1:46.5; today's 1:45.5 "
+                      "beats it; you're averaging 1:46.9, 1.5 seconds off.")
+    assert len(spoken.split()) <= rm.SPOKEN_BUDGET_WORDS
+
+    slower = CarTelemetry(stored_best_lap=106.481, pace_lap=106.9, best_lap_time=106.6)
+    assert "beats it" not in rm.pace_reference(
+        slower, TrackConfig(session_type="Race"))["spoken"]

@@ -18,11 +18,24 @@ from . import (NO_LAP_TIME, OFF_THE_MEDIAN, CarTelemetry, LapRecord, Rival,
                TelemetryAdapter, TelemetrySnapshot, TrackConfig, TyreState,
                session_kind)
 from ..pit_commands import PitCommand, PitTireCompound
+from .iracing_files import fuel_data_path, fuel_history
 
 logger = logging.getLogger("race-engineer")
 
 # How long to wait before retrying irsdk.startup() while iRacing is closed.
 _STARTUP_RETRY_SECONDS = 2.0
+
+# Points per lap at which the gap to every car is sampled, the same gates the
+# adjacent-car trend uses. A gap rate compares each with the same gate a lap
+# before, so 20 per lap is one comparison every 5 % of the track.
+_GAP_GATES = 20
+
+# How often iRacing's fuel history file is looked at again. It changes as the
+# sim records laps, not every poll.
+_FUEL_HISTORY_RECHECK_SECONDS = 30.0
+
+# A stated burn outside this, in litres a lap, was misheard rather than meant.
+_STATED_BURN_LITRES = (0.1, 20.0)
 
 # How long a completed lap waits for LapLastLapTime to change. The longest
 # lag in 53 recorded sessions was 2.1 s of session time.
@@ -578,6 +591,11 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # it; see _update_laps().
         self._pending_lap: Optional[Dict[str, Any]] = None
         self._last_lap_time_seen: Any = None
+        # iRacing's stored best and optimal lap for this car here, derived
+        # from its delta channels; see _note_reference_laps().
+        self._deltas_seen: Tuple[Optional[float], Optional[float]] = (None, None)
+        self._reference_candidates: Dict[str, Optional[float]] = {}
+        self._stored_laps: Dict[str, Optional[float]] = {}
         # Which session segment we were in at the last poll. LapCompleted is
         # "Laps completed count" with no session qualifier — which is why
         # RaceLaps exists separately — so it is not known whether it keeps
@@ -619,6 +637,12 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._last_lap_fuel: Optional[float] = None
         self._last_lap_fuel_clean: Optional[bool] = None
         self._stint_start_fuel: Optional[float] = None
+        # The driver's own burn figure, litres a lap, for this session only.
+        self._stated_burn: Optional[float] = None
+        # (car, track) -> iRacing's recorded burn, litres a lap, and when the
+        # file was last looked at. See _fuel_history_litres().
+        self._fuel_history: Tuple[Optional[Tuple[str, str]], float, List[float]] = (
+            None, 0.0, [])
         # (lap-progress gate, monotonic time, timing gap) samples. Comparing
         # the same small slices of track removes the enormous false closing
         # rates that braking and corner phase produced from physical distance.
@@ -626,6 +650,9 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._gap_hist_behind: Deque[Tuple[int, float, float]] = deque(maxlen=40)
         # Which car each gap history belongs to; see _closing_trend.
         self._closing_who: Dict[int, str] = {}
+        # car index -> (who, (gate, signed gap) samples); see _update_gap_rates.
+        self._gap_history: Dict[int, Tuple[str, Deque[Tuple[int, float]]]] = {}
+        self._gap_gate: Optional[int] = None
         # Last seen lap number per car index, for the start/finish desync in
         # _live_order(). Cleared per session, not per poll.
         self._prev_lap: Dict[int, int] = {}
@@ -1030,6 +1057,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._laps.clear()
         self._lap_marker = None
         self._pending_lap = None
+        self._reference_candidates = {}
+        self._stored_laps = {}
         self._session_num = None
         self._segment_restarted = False
         self._grid_latched = None
@@ -1049,8 +1078,12 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._last_lap_fuel = None
         self._last_lap_fuel_clean = None
         self._stint_start_fuel = None
+        self._stated_burn = None
+        self._fuel_history = (None, 0.0, [])
         self._gap_hist_ahead.clear()
         self._gap_hist_behind.clear()
+        getattr(self, "_gap_history", {}).clear()
+        self._gap_gate = None
         getattr(self, "_closing_who", {}).clear()
         self._prev_lap.clear()
         self._sector_prev.clear()
@@ -1136,6 +1169,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._update_sectors()
         self._update_laps()
         self._update_rival_laps()
+        self._update_gap_rates()
         self._update_fuel_usage()
         ahead, behind = self._rivals()
         standings, field_size, fastest = self._standings()
@@ -1177,7 +1211,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
             caution_flags=results["caution_flags"],
             caution_laps=results["caution_laps"],
             lead_changes=results["lead_changes"],
-            time_remaining=_duration(self._get("SessionTimeRemain")),
+            time_remaining=self._time_remaining(),
             time_total=_duration(self._get("SessionTimeTotal")),
             solo_qualifying=qualifying["solo"],
             qualify_scoring=qualifying["scoring"],
@@ -1185,6 +1219,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
         )
 
         per_lap = self._fuel_per_lap()
+        history = self._fuel_history_litres()
         levels = self._fluid_levels()
         car_progress = float(self._get("LapDistPct", 0.0) or 0.0)
         laps_estimated = track.laps_remaining is None and track.time_remaining is not None
@@ -1303,6 +1338,11 @@ class iRacingTelemetryReader(TelemetryAdapter):
             fuel_burn_samples=len(self._fuel_usage),
             fuel_burn_min=self._fuel(min(self._fuel_usage)) if self._fuel_usage else None,
             fuel_burn_max=self._fuel(max(self._fuel_usage)) if self._fuel_usage else None,
+            fuel_history_per_lap=self._fuel(_mean(history)),
+            fuel_history_min=self._fuel(min(history)) if history else None,
+            fuel_history_max=self._fuel(max(history)) if history else None,
+            fuel_history_samples=len(history),
+            fuel_burn_stated=self._fuel(getattr(self, "_stated_burn", None)),
             fuel_last_lap=self._fuel(self._last_lap_fuel),
             fuel_last_lap_clean=self._last_lap_fuel_clean,
             fuel_used_stint=self._fuel(self._stint_used()),
@@ -1385,7 +1425,11 @@ class iRacingTelemetryReader(TelemetryAdapter):
             pit_service_status=_enum_map("PitSvStatus", {0: "none"}).get(
                 self._get("PlayerCarPitSvStatus")),
             avg_lap_time=_positive(self._get("LapLastNLapTime")),
-            pace_lap=self._representative_lap(),
+            # What is actually being driven, or nothing: the stand-ins
+            # _representative_lap() falls back on are not a pace to quote.
+            pace_lap=self._clean_pace(),
+            stored_best_lap=getattr(self, "_stored_laps", {}).get("best"),
+            stored_optimal_lap=self._stored_optimal(),
             # m/s -> km/h; the rest are read as published.
             wind_speed=(lambda v: v * 3.6 if v is not None else None)(
                 _positive(self._get("WindVel"))),
@@ -2057,6 +2101,14 @@ class iRacingTelemetryReader(TelemetryAdapter):
         # fewer ticks than the poll interval.
         before = getattr(self, "_last_lap_time_seen", None)
         self._last_lap_time_seen = self._get("LapLastLapTime")
+        # The deltas to iRacing's stored best and optimal laps, as they stood
+        # on the poll before the line: at the line, that is the lap's final
+        # delta to within a poll.
+        deltas_before = getattr(self, "_deltas_seen", (None, None))
+        self._deltas_seen = (
+            _delta(self._get("LapDeltaToBestLap"), self._get("LapDeltaToBestLap_OK")),
+            _delta(self._get("LapDeltaToOptimalLap"),
+                   self._get("LapDeltaToOptimalLap_OK")))
 
         if self._lap_marker is None:
             self._lap_marker = completed
@@ -2081,6 +2133,7 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 "note": reason,
                 "session_num": session_num,
                 "caution": getattr(self, "_lap_caution", False),
+                "deltas": deltas_before,
             }
             self._lap_dirty, self._lap_dirty_reason = False, ""
             self._lap_caution = False
@@ -2098,6 +2151,54 @@ class iRacingTelemetryReader(TelemetryAdapter):
             # time identical to the last. Neither can be told apart from a
             # stale reading, so the lap is kept without one.
             self._flush_pending_lap()
+
+    def _note_reference_laps(self, lap_time: float,
+                             deltas: Tuple[Optional[float], Optional[float]]) -> None:
+        """iRacing's stored best and optimal lap, from a lap and its delta.
+
+        The SDK publishes no personal-best time, but LapDeltaToBestLap and
+        LapDeltaToOptimalLap are measured against the laps iRacing keeps in
+        Documents\\iRacing\\lapfiles — they are valid before any lap of the
+        session exists. A lap's time less its delta at the line is that
+        stored lap: across 15 recorded Bathurst sessions this gave 128.219,
+        126.788, 125.667 and 125.445, each the best lap recorded until then,
+        to the millisecond.
+
+        It is wrong on some laps — a race's first lap read 129.5 and 132.6
+        against a stored 125.4 — so a figure stands only once two laps in a
+        row agree on it, or once it is a lap the driver just drove: beating
+        the stored best makes that lap the new one, and the next reading
+        says so. Waiting for a second agreeing lap instead left a 2:05.667
+        set at the end of a session unreported.
+        """
+        if not hasattr(self, "_reference_candidates"):
+            self._reference_candidates, self._stored_laps = {}, {}
+        driven = [lap.time for lap in list(self._laps)[-3:] if lap.time > 0]
+        for name, delta in zip(("best", "optimal"), deltas):
+            if delta is None:
+                continue
+            candidate = round(lap_time - delta, 3)
+            previous = self._reference_candidates.get(name)
+            self._reference_candidates[name] = candidate
+            agreed = previous is not None and abs(candidate - previous) <= 0.01
+            if name == "best" and any(abs(candidate - t) <= 0.01 for t in driven):
+                agreed = True
+            if candidate > 0 and agreed:
+                self._stored_laps[name] = candidate
+
+    def _stored_optimal(self) -> Optional[float]:
+        """The stored optimal lap, only while it is not slower than the best.
+
+        The optimal improves on almost every lap a sector improves, so two
+        laps rarely agree on it and an accepted figure goes stale; across
+        the recorded sessions four ended with an "optimal" slower than the
+        best lap, which no optimal can be. Then there is none to give.
+        """
+        stored = getattr(self, "_stored_laps", {})
+        optimal, best = stored.get("optimal"), stored.get("best")
+        if optimal is None or (best is not None and optimal > best + 0.005):
+            return None
+        return optimal
 
     def _lap_clock(self) -> float:
         """Session time, which is what LapLastLapTime's lag is measured in;
@@ -2119,6 +2220,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
         clean, note = pending["clean"], pending["note"]
         if lap_time is None:
             clean, note = False, note or NO_LAP_TIME
+        else:
+            self._note_reference_laps(lap_time, pending.get("deltas") or (None, None))
         self._laps.append(LapRecord(
             lap=pending["lap"],
             time=round(lap_time, 3) if lap_time is not None else 0.0,
@@ -2218,6 +2321,94 @@ class iRacingTelemetryReader(TelemetryAdapter):
                     self._record_rival_lap(idx, state, lap_time)
                 else:
                     state["unpaired"] = lap_time
+
+    def _update_gap_rates(self) -> None:
+        """Sample the timing gap to every car at fixed points on the lap.
+
+        iRacing publishes no closing rate — its relative box shows a gap and
+        the driver reads the change. CrewChief times each car past fixed
+        distance points and compares. This does the same with the gap
+        itself: at each of the driver's gates it records the signed
+        CarIdxEstTime gap to every car within a lap (positive behind), so the
+        same gate a lap later says exactly how much that gap moved over one
+        lap, at the same corner. It works a lap and a half into a fight,
+        where the catch projection's lap times needed three clean laps of
+        both cars, and it measures the gap rather than predicting it.
+
+        Anything that breaks comparability starts it again: a skipped gate,
+        the driver in the pits, towed or under caution, a car in the pits or
+        a different driver in it.
+        """
+        if not hasattr(self, "_gap_history"):
+            self._gap_history, self._gap_gate = {}, None
+        my_idx = self._player_idx()
+        completed = _int_or(self._get("LapCompleted"), None)
+        try:
+            pct = float(self._get("LapDistPct"))
+        except (TypeError, ValueError):
+            return
+        if my_idx is None or completed is None or pct < 0:
+            return
+        gate = completed * _GAP_GATES + int(min(0.999999, pct) * _GAP_GATES)
+        last = self._gap_gate
+        if gate == last:
+            return
+        self._gap_gate = gate
+        racing = (_SESSION_STATES.get(self._get("SessionState"), "") == "Racing"
+                  and session_kind(self._session_type()) == "race")
+        neutral = (not racing or bool(self._get("OnPitRoad", False))
+                   or _caution_out(self._get("SessionFlags"))
+                   or _positive(self._get("PlayerCarTowTime")) is not None)
+        if neutral or (last is not None and gate != last + 1):
+            # A skipped gate restarts from here; the rest stop recording.
+            self._gap_history.clear()
+        if neutral:
+            return
+
+        covered = {idx: distance for distance, idx in self._live_order()}
+        mine = covered.get(my_idx)
+        if mine is None:
+            return
+        est_times = self._get("CarIdxEstTime") or []
+        pits = self._get("CarIdxOnPitRoad") or []
+        lap_time = (self._representative_lap()
+                    or _positive(self._get("LapBestLapTime")) or 0.0)
+        drivers = self._drivers()
+        for idx, distance in covered.items():
+            if idx == my_idx:
+                continue
+            ahead = distance > mine
+            gap = None
+            if abs(distance - mine) < 1.0 and not bool(_at(pits, idx, False)):
+                gap = self._gap_seconds(my_idx, idx, ahead, est_times, lap_time)
+            if gap is None:
+                self._gap_history.pop(idx, None)
+                continue
+            info = drivers.get(idx, {})
+            who = f"{info.get('car_number', '')}|{info.get('name', '')}"
+            entry = self._gap_history.get(idx)
+            if entry is None or entry[0] != who:
+                entry = (who, deque(maxlen=3 * _GAP_GATES))
+                self._gap_history[idx] = entry
+            entry[1].append((gate, -gap if ahead else gap))
+
+    def _gap_rate(self, idx: int) -> Tuple[Optional[float], int]:
+        """(seconds a lap the gap to `idx` is shrinking, comparisons behind it).
+
+        Each comparison is one gate against the same gate a lap earlier.
+        Positive means closing, whichever side the car is on.
+        """
+        entry = getattr(self, "_gap_history", {}).get(idx)
+        if not entry or not entry[1]:
+            return None, 0
+        samples = dict(entry[1])
+        moves = [samples[g] - samples[g - _GAP_GATES]
+                 for g in samples if g - _GAP_GATES in samples]
+        if not moves:
+            return None, 0
+        signed = sum(moves) / len(moves)
+        behind = entry[1][-1][1] > 0
+        return round(-signed if behind else signed, 3), len(moves)
 
     def _record_rival_lap(self, idx: int, state: Dict[str, Any],
                           lap_time: float) -> None:
@@ -2338,6 +2529,65 @@ class iRacingTelemetryReader(TelemetryAdapter):
         self._fuel_marker = (completed, level)
         self._fuel_minimum = level
 
+    def set_stated_fuel_burn(self, value: float,
+                             unit: Optional[str] = None) -> Optional[float]:
+        with self._lock:
+            unit = (unit or self._fuel_unit()).lower()
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+            if unit.startswith("gal"):
+                litres = value * _LITRES_PER_US_GALLON
+            elif unit.startswith("k"):
+                litres = value / self._fuel_density()
+            else:
+                litres = value
+            low, high = _STATED_BURN_LITRES
+            if not low <= litres <= high:
+                return None
+            self._stated_burn = litres
+            logger.info("Driver's stated burn: %.3f L a lap", litres)
+            return litres
+
+    def _fuel_history_litres(self) -> List[float]:
+        """iRacing's recorded burn for this car here, litres a lap.
+
+        From fueldata.ini (see iracing_files), looked at again every half
+        minute at most, and converted at this car's own density — the file
+        is in kilograms.
+        """
+        weekend = self._session("WeekendInfo", {}) or {}
+        key = (str(self._player().get("car_path") or ""),
+               str(weekend.get("TrackName") or ""))
+        cached_key, checked, values = getattr(self, "_fuel_history", (None, 0.0, []))
+        now = time.monotonic()
+        if key == cached_key and now - checked < _FUEL_HISTORY_RECHECK_SECONDS:
+            return values
+        path = fuel_data_path()
+        kilos = fuel_history(path, *key)
+        values = [kg / self._fuel_density() for kg in kilos]
+        if key != cached_key:
+            logger.info("iRacing fuel history for %s at %s: %d laps (%s)",
+                        key[0], key[1], len(values), path)
+        self._fuel_history = (key, now, values)
+        return values
+
+    def _time_remaining(self) -> Optional[float]:
+        """Race time left. Before the green, the race's scheduled length.
+
+        Until the start, SessionTimeRemain counts down the gridding — 263.8 s
+        at Imola before a 20-minute race — and divided by a lap time that was
+        a race of two laps.
+        """
+        if self._race_not_started():
+            raw = str(self._current_session().get("SessionTime") or "")
+            try:
+                return _duration(float(raw.split()[0]))
+            except (IndexError, ValueError):
+                return None
+        return _duration(self._get("SessionTimeRemain"))
+
     def _fuel_capacity(self) -> Optional[float]:
         """Usable tank size in litres, from the session YAML.
 
@@ -2381,17 +2631,45 @@ class iRacingTelemetryReader(TelemetryAdapter):
         in the remaining time, the fuel requirement is inflated, and the
         engineer calls a stop the driver did not need.
 
-        The mean of recent clean laps is what actually gets driven. Best lap
-        is a last resort, and only once nothing better exists.
+        The mean of recent clean laps is what actually gets driven.
+
+        Before there is one, no lap time is right, and the choice is which way
+        to be wrong. The only lap there may be is the standing start — 1:59
+        at Mexico City against 1:46-1:48 race pace — which fits too few laps
+        into the clock and tells the driver they need less fuel than they do.
+        So the quickest of what exists is used: that lap, this session's best,
+        and iRacing's estimated lap time for the car, which ran 2-9 % quicker
+        than the driver's real laps in all five recorded races. That errs to
+        a lap more and a lap's fuel more, never to a dry tank, and a lap count
+        from the clock is always spoken as an estimate.
         """
+        pace = self._clean_pace()
+        if pace:
+            return pace
+        candidates = [_positive(self._get("LapLastLapTime")),
+                      _positive(self._get("LapBestLapTime")),
+                      self._car_est_lap_time()]
+        candidates = [lap for lap in candidates if lap]
+        return min(candidates) if candidates else None
+
+    def _clean_pace(self) -> Optional[float]:
+        """Mean of the last five clean laps, or None before there is one."""
         clean = [l.time for l in self._laps if l.clean and l.time > 0]
-        if clean:
-            recent = clean[-5:]
-            return sum(recent) / len(recent)
-        last = _positive(self._get("LapLastLapTime"))
-        if last:
-            return last
-        return _positive(self._get("LapBestLapTime"))
+        if not clean:
+            return None
+        recent = clean[-5:]
+        return sum(recent) / len(recent)
+
+    def _car_est_lap_time(self) -> Optional[float]:
+        """iRacing's estimated lap time for the driver's car.
+
+        DriverInfo:DriverCarEstLapTime; CarClassEstLapTime on the driver's
+        row is the same figure, published for every car for broadcasters,
+        and is the fallback.
+        """
+        info = self._session("DriverInfo", {}) or {}
+        return (_positive(info.get("DriverCarEstLapTime"))
+                or self._player().get("class_est_lap_time"))
 
     def _stint_used(self) -> Optional[float]:
         """Fuel burnt since the last refuel — measured, not predicted."""
@@ -2831,6 +3109,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 tyre_compound=_count(at(compound)),
                 recent_laps=_mark_off_median(
                     list(getattr(self, "_rival_laps", {}).get(idx, []))),
+                gap_rate_per_lap=self._gap_rate(idx)[0],
+                gap_rate_pairs=self._gap_rate(idx)[1],
                 sector_times=list(self._sector_times.get(idx, [])),
                 in_pits=bool(at(pits, False)),
                 track_surface=surface_names.get(at(surfaces), "") or "",
@@ -2971,6 +3251,8 @@ class iRacingTelemetryReader(TelemetryAdapter):
                 gap=gap,
                 gap_metres=metres,
                 trend_gap=timing_gap,
+                gap_rate_per_lap=self._gap_rate(idx)[0],
+                gap_rate_pairs=self._gap_rate(idx)[1],
                 position=rank + 1,
                 laps_down=laps_down,
                 push_to_pass_count=_count(_at(p2p_counts, idx)),
